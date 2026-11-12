@@ -398,12 +398,23 @@ class TracerApp:
         self.hub.start()
         self.proxy.start()
         handler = make_handler(self)
-        httpd = ThreadingHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
+        httpd = QuietHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
         httpd.daemon_threads = True
         log.info("Analyse-Oberflaeche: http://localhost:%d", self.cfg["http_port"])
         log.info("Shots werden gespeichert in: %s", self.store.root)
         log.info("PC-IP-Adressen fuer die Handy-App: %s", ", ".join(local_ips()) or "?")
         httpd.serve_forever()
+
+
+class QuietHTTPServer(ThreadingHTTPServer):
+    """Browser brechen Video-Verbindungen beim Spulen ständig ab - das ist normal, kein Fehler."""
+
+    def handle_error(self, request, client_address):
+        import sys
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def local_ips():

@@ -146,8 +146,9 @@ setInterval(poll, 1500); poll();
 function renderList() {
   $('#list').innerHTML = shots.map(s => {
     const pl = (s.shot && s.shot.payload) || {}, b = pl.BallData || {}, c = pl.ClubData || {};
-    const t = s.id.slice(9, 11) + ':' + s.id.slice(11, 13) + ':' + s.id.slice(13, 15);
-    const d = s.id.slice(6, 8) + '.' + s.id.slice(4, 6) + '.';
+    const m = s.id.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/) || [];
+    const t = m[0] ? `${m[4]}:${m[5]}:${m[6]}` : '';
+    const d = m[0] ? `${m[3]}.${m[2]}.` : s.id;
     const club = (s.shot && s.shot.club) || '';
     const main = s.shot && s.shot.test ? 'Testclip' : `${fmt(b.Speed)} mph · ${fmt(b.VLA)}° · ${fmt(b.TotalSpin, 0)} rpm`;
     return `<div class="shot ${cur && cur.id === s.id ? 'sel' : ''}" data-id="${s.id}">
