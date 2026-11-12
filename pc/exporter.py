@@ -152,7 +152,33 @@ class Exporter:
             finally:
                 self.busy = None
 
-    def _line_overlays(self, lines, w, h, shot_dir, fs, files, font_bold):
+    def _auto_analyze(self, sid, clip, notes, video):
+        try:
+            import swing_analysis
+        except ImportError:
+            return notes
+        if not swing_analysis.AVAILABLE:
+            log.info("Automatische Linien aus: OpenCV fehlt (pip install opencv-python-headless numpy)")
+            return notes
+        res = swing_analysis.analyze(clip, (video or {}).get("trigger_time"))
+        notes = self.store.read_json(sid, "notes.json") or {}   # frisch lesen (Viewer koennte geschrieben haben)
+        notes["analysis"] = {k: v for k, v in res.items() if k != "lines"}
+        if "error" in res:
+            log.info("Analyse %s: %s", sid, res["error"])
+        else:
+            # eigene (von Hand gezeichnete) Linien behalten, gleiche Art wird nicht ueberschrieben
+            manual = [l for l in notes.get("lines") or [] if not l.get("auto")]
+            have = {l.get("label") for l in manual}
+            notes["lines"] = manual + [l for l in res.get("lines", []) if l["label"] not in have]
+            if notes.get("impact_time") is None:
+                notes["impact_time"] = res["impact_time"]
+            notes["swing"] = {"start": res["swing_start"], "end": res["swing_end"]}
+            log.info("Analyse %s: Treffmoment %.3f s, Linien: %s", sid, res["impact_time"],
+                     ", ".join(l["label"] for l in res.get("lines", [])) or "keine")
+        self.store.write_json(sid, "notes.json", notes)
+        return notes
+
+    def _line_overlays(self, lines, w, h, shot_dir, fs, files, font_bold, t0=0.0):
         """
         Erzeugt pro Linie ein transparentes PNG (per FFmpeg geq) und die Beschriftung.
         Linie: {"x1","y1","x2","y2"} normiert 0..1 (Punkt 1 = Schlaegerkopf, Punkt 2 = Richtung Griff),
@@ -188,7 +214,7 @@ class Exporter:
             if res.returncode != 0:
                 log.warning("Linie %d: %s", i, res.stderr.strip()[-300:])
                 continue
-            start = float(ln.get("from", 0) or 0)
+            start = max(0.0, float(ln.get("from", 0) or 0) - t0)   # Zeit im zugeschnittenen Video
             inputs[png] = start
             # Beschriftung mit Winkel zur Horizontalen
             ang = math.degrees(math.atan2(abs(Y2 - Y1), abs(X2 - X1)))
@@ -253,9 +279,15 @@ class Exporter:
             return (f"drawtext=fontfile='{font}':textfile={file}:fontcolor={color}:fontsize={size}"
                     f":x={x}:y={y}:line_spacing={lh}")
 
-        # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
+        # Automatische Analyse (Treffmoment, Ansprechen, Schaftlinien) - einmal pro Clip
         notes = self.store.read_json(sid, "notes.json") or {}
-        line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb)
+        if self.cfg.data.get("auto_analysis", True) and "analysis" not in notes:
+            notes = self._auto_analyze(sid, clip, notes, video)
+        sw = notes.get("swing") or {}
+        t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
+        t1 = float(sw["end"]) if self.cfg.data.get("export_trim", True) and sw.get("end") else None
+        # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
+        line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)
 
         vf = ",".join(line_filters + [
             f"drawbox=x=0:y=ih-{panel_h}:w=iw:h={panel_h}:color=black@0.62:t=fill",
@@ -269,7 +301,12 @@ class Exporter:
             f"setpts={slow:g}*PTS",
         ])
         tmp = os.path.join(shot_dir, "_export.tmp.mp4")
-        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", "clip.mp4"]
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+        if t0 > 0:
+            cmd += ["-ss", f"{t0:.4f}"]
+        if t1:
+            cmd += ["-t", f"{t1 - t0:.4f}"]
+        cmd += ["-i", "clip.mp4"]
         for png in line_inputs:
             cmd += ["-loop", "1", "-i", png]
         if line_inputs:
@@ -282,7 +319,8 @@ class Exporter:
             cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
         else:
             cmd += ["-vf", vf]
-        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        crf = str(int(self.cfg.data.get("export_crf", 28)))
+        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", "slow", "-crf", crf,
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         res = subprocess.run(cmd, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)

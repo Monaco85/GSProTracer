@@ -50,6 +50,9 @@ DEFAULT_CONFIG = {
     "exports_dir": "exports",          # fertige Videos mit eingeblendeten Schlagdaten
     "export_playback_fps": 30,         # 240 fps -> 30 fps = Zeitlupe 1/8, jedes Bild sichtbar
     "ffmpeg_path": "",                 # leer = automatisch suchen
+    "auto_analysis": True,             # Treffmoment + Schaftlinien automatisch erkennen (OpenCV)
+    "export_trim": True,               # Export nur vom Ansprechen bis kurz nach dem Treffmoment
+    "export_crf": 28,                  # Kompression (hoeher = kleiner, 23 = sehr gut, 30 = klein)
 }
 
 

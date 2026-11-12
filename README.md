@@ -95,6 +95,13 @@ eingeblendeten Werten (Geschwindigkeiten in **km/h**) als Zeitlupe 1/8 (jedes 24
 `pc\exports\`, z. B. `2026-11-12_12-40-04_7I_196kmh.mp4`. Braucht FFmpeg (`winget install Gyan.FFmpeg`).
 Tempo über `export_playback_fps` in `pc\config.json` (30 = 1/8, 240 = Echtzeit).
 
+**Automatische Analyse** (`pc\swing_analysis.py`, braucht `pip install opencv-python-headless numpy`):
+erkennt Treffmoment (Ball verschwindet), Ansprechen (letztes ruhiges Bild vor dem Rückschwung) und zeichnet
+den Schaft beim **Ansprechen** (blau) und kurz vor dem Treffen im **Abschwung** (orange) mit Winkel ein.
+Das Video wird auf den Schwung zugeschnitten (Ansprechen − 0,25 s bis Treffmoment + 0,6 s), ca. 0,5–1 MB pro Schlag.
+Von Hand gezeichnete Linien (Analyse-Seite) haben Vorrang. Einstellungen: `auto_analysis`, `export_trim`,
+`export_crf` (höher = kleiner).
+
 Dateien: `pc\shots\<JJJJMMTT-hhmmss-nn>\` → `clip.mp4`, `shot.json` (Original-Daten des Connectors),
 `video.json`, `notes.json`. Einstellungen: `pc\config.json`.
 

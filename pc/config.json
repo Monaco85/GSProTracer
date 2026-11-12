@@ -10,5 +10,8 @@
   "shots_dir": "shots",
   "exports_dir": "exports",
   "export_playback_fps": 30,
-  "ffmpeg_path": ""
+  "ffmpeg_path": "",
+  "auto_analysis": true,
+  "export_trim": true,
+  "export_crf": 28
 }
