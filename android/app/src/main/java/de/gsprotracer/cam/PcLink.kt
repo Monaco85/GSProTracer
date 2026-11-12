@@ -25,6 +25,8 @@ class PcLink(private val listener: Listener) {
         fun onLinkState(connected: Boolean, text: String)
         fun statusJson(): JSONObject
         fun onUploadState(pending: Int, lastMessage: String)
+        /** PC moechte ein Live-Bild (wird alle ~2 s erneuert, solange die Live-Seite offen ist). */
+        fun onPreviewRequest()
     }
 
     companion object { private const val TAG = "PcLink" }
@@ -63,6 +65,7 @@ class PcLink(private val listener: Listener) {
         stop()
         scheduler.shutdownNow()
         uploader.shutdownNow()
+        previewExecutor.shutdownNow()
     }
 
     /** Verbindung sofort neu aufbauen (z.B. nach Aenderung der IP). */
@@ -120,6 +123,42 @@ class PcLink(private val listener: Listener) {
                     msg.optDouble("post", 0.5),
                     msg.optDouble("delay", 0.0),
                 )
+            }
+            "preview" -> {
+                msg.optInt("upload_port", 0).takeIf { it > 0 }?.let { uploadPort = it }
+                listener.onPreviewRequest()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ Live-Bild
+
+    private val previewExecutor = Executors.newSingleThreadExecutor()
+    @Volatile var previewBusy = false; private set
+
+    /** Schickt ein JPEG an den PC. Laeuft schon eins, wird das Bild verworfen (kein Stau). */
+    fun postPreview(jpeg: ByteArray) {
+        if (previewBusy || host.isBlank()) return
+        previewBusy = true
+        previewExecutor.execute {
+            try {
+                val conn = URL("http://$host:$uploadPort/api/preview").openConnection() as HttpURLConnection
+                try {
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.connectTimeout = 2000
+                    conn.readTimeout = 3000
+                    conn.setRequestProperty("Content-Type", "image/jpeg")
+                    conn.setFixedLengthStreamingMode(jpeg.size)
+                    conn.outputStream.use { it.write(jpeg) }
+                    conn.responseCode
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.i(TAG, "Live-Bild: ${e.message}")
+            } finally {
+                previewBusy = false
             }
         }
     }

@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, urlparse
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 VIEWER_PATH = os.path.join(BASE_DIR, "viewer.html")
+LIVE_PATH = os.path.join(BASE_DIR, "live.html")
 SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 log = logging.getLogger("tracer")
@@ -327,6 +328,31 @@ class TracerApp:
         self.proxy = GSProProxy(self.cfg, self.handle_shot, self.handle_gspro_msg)
         self.player = {}
         self.last_shot_id = None
+        # Live-Bild vom Handy (nur solange die Live-Seite offen ist)
+        self.preview_lock = threading.Lock()
+        self.preview_jpeg = None
+        self.preview_at = 0.0
+        self.preview_frames = []      # Zeitstempel der letzten Bilder -> fps
+        self.preview_keepalive = 0.0
+
+    def request_preview(self):
+        """Wird bei jedem Abruf der Live-Seite aufgerufen; haelt das Handy im Live-Modus."""
+        now = time.time()
+        if now - self.preview_keepalive > 1.5:
+            self.preview_keepalive = now
+            self.hub.broadcast({"type": "preview", "upload_port": self.cfg["http_port"]})
+
+    def store_preview(self, jpeg):
+        now = time.time()
+        with self.preview_lock:
+            self.preview_jpeg = jpeg
+            self.preview_at = now
+            self.preview_frames = [t for t in self.preview_frames if now - t < 2.0] + [now]
+
+    def preview_fps(self):
+        with self.preview_lock:
+            f = [t for t in self.preview_frames if time.time() - t < 2.0]
+        return round(len(f) / 2.0, 1)
 
     def handle_gspro_msg(self, obj):
         if obj.get("Code") == 201 and isinstance(obj.get("Player"), dict):
@@ -472,6 +498,24 @@ def make_handler(app: TracerApp):
                 if p in ("/", "/index.html"):
                     with open(VIEWER_PATH, "r", encoding="utf-8") as f:
                         return self.send_text(f.read(), ctype="text/html; charset=utf-8")
+                if p in ("/live", "/live.html"):
+                    with open(LIVE_PATH, "r", encoding="utf-8") as f:
+                        return self.send_text(f.read(), ctype="text/html; charset=utf-8")
+                if p == "/api/preview.jpg":
+                    app.request_preview()
+                    with app.preview_lock:
+                        jpeg, at = app.preview_jpeg, app.preview_at
+                    if not jpeg or time.time() - at > 3.0:
+                        return self.send_text("kein Live-Bild", 503)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(jpeg)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Frame-Age", f"{time.time() - at:.3f}")
+                    self.send_header("X-Preview-Fps", str(app.preview_fps()))
+                    self.end_headers()
+                    self.wfile.write(jpeg)
+                    return
                 if p == "/api/status":
                     return self.send_json(app.status())
                 if p == "/api/shots":
@@ -556,6 +600,9 @@ def make_handler(app: TracerApp):
             try:
                 if u.path == "/api/upload":
                     return self.handle_upload(q)
+                if u.path == "/api/preview":
+                    app.store_preview(self.read_body(limit=3_000_000))
+                    return self.send_json({"ok": True})
                 if u.path == "/api/trigger":
                     self.read_body()
                     sid = app.handle_shot({}, test=True)

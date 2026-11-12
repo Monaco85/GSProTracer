@@ -82,6 +82,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             override fun run() { refreshStatus(); status.postDelayed(this, 1000) }
         }
         status.post(ticker)
+        texture.post(previewTick)
     }
 
     // ------------------------------------------------------------------ UI
@@ -254,7 +255,55 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         } else if (rotation == 2) {
             matrix.postRotate(180f, cx, cy)
         }
+        viewMatrix = Matrix(matrix)
         texture.setTransform(matrix)
+    }
+
+    // ------------------------------------------------------------------ Live-Bild fuer den PC (~5 fps)
+
+    private var viewMatrix = Matrix()
+    @Volatile private var previewUntil = 0L
+    private val previewWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private val previewTick = object : Runnable {
+        override fun run() {
+            if (android.os.SystemClock.uptimeMillis() < previewUntil && !link.previewBusy) sendPreviewFrame()
+            texture.postDelayed(this, 200)
+        }
+    }
+
+    /**
+     * TextureView.getBitmap() liefert das Bild ohne die Drehung der Ansicht (Erfahrung aus Tennisrecord).
+     * Deshalb dieselbe Matrix von Hand anwenden, danach die eingestellte Video-Drehung.
+     */
+    private fun sendPreviewFrame() {
+        if (!texture.isAvailable || texture.width == 0) return
+        val w = 640; val h = 360
+        val sx = w.toFloat() / texture.width
+        val sy = h.toFloat() / texture.height
+        val m = Matrix().apply { setScale(1 / sx, 1 / sy); postConcat(viewMatrix); postScale(sx, sy) }
+        val raw = texture.getBitmap(w, h) ?: return
+        val rot = recorder.extraRotation
+        previewWorker.execute {
+            try {
+                val upright = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                android.graphics.Canvas(upright).drawBitmap(raw, m, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+                raw.recycle()
+                val out = if (rot != 0) {
+                    val r = android.graphics.Bitmap.createBitmap(upright, 0, 0, w, h, Matrix().apply { postRotate(rot.toFloat()) }, true)
+                    upright.recycle(); r
+                } else upright
+                val bos = java.io.ByteArrayOutputStream()
+                out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, bos)
+                out.recycle()
+                link.postPreview(bos.toByteArray())
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override fun onPreviewRequest() {
+        previewUntil = android.os.SystemClock.uptimeMillis() + 5000
     }
 
     // ------------------------------------------------------------------ Lifecycle
@@ -275,6 +324,8 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     }
 
     override fun onDestroy() {
+        texture.removeCallbacks(previewTick)
+        previewWorker.shutdownNow()
         recorder.release()
         link.shutdown()
         super.onDestroy()

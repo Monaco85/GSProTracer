@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kamera ausrichten</title>
+<style>
+:root{--bg:#0f1214;--panel:#181c1f;--panel2:#20262a;--line:#2c3439;--text:#e6ebee;--muted:#8b979e;--acc:#3fb97a;--warn:#e0a63a;--bad:#e05a4f;--guide:rgba(255,235,59,.75)}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 8px 0 0}
+.pill{padding:3px 10px;border-radius:99px;background:var(--panel2);color:var(--muted);font-size:12px;white-space:nowrap}
+.pill.ok{color:#08150e;background:var(--acc)} .pill.bad{color:#fff;background:var(--bad)} .pill.warn{color:#1a1200;background:var(--warn)}
+button,a.btn{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;text-decoration:none}
+button:hover,a.btn:hover{border-color:var(--muted)} button.on{background:var(--acc);color:#08150e;border-color:var(--acc)}
+.spacer{flex:1}
+main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:12px}
+#frame{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;width:min(100%,calc((100vh - 130px)*16/9));cursor:crosshair}
+#frame.portrait{aspect-ratio:9/16;width:min(100%,calc((100vh - 130px)*9/16))}
+#img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted)}
+svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#stats{position:absolute;right:8px;bottom:8px;background:#000a;color:#fff;font-size:12px;padding:3px 8px;border-radius:4px;font-variant-numeric:tabular-nums}
+footer{padding:6px 16px 10px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>📷 Kamera ausrichten</h1>
+  <span id="stPhone" class="pill">Handy …</span>
+  <span class="spacer"></span>
+  <button id="bGrid" class="on" title="Drittel-Raster">Raster</button>
+  <button id="bCross" class="on" title="Bildmitte">Mitte</button>
+  <button id="bClear" title="Gesetzte Markierungen löschen">Markierungen ✕</button>
+  <button id="bPause">Pause</button>
+  <button id="bTest" title="3-s-Clip aufnehmen und an den PC schicken">Testclip</button>
+  <a class="btn" href="/">← Analyse</a>
+</header>
+<main>
+  <div id="frame">
+    <img id="img" alt="">
+    <div id="msg">Warte auf Live-Bild vom Handy …</div>
+    <svg id="ov" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+    <div id="stats"></div>
+  </div>
+</main>
+<footer>Ins Bild klicken setzt eine Markierung (z. B. Ballposition, Abschlagmatte) – sie bleibt gespeichert, damit du die Kamera später wieder genauso ausrichten kannst. Das Handy sendet nur, solange diese Seite offen ist.</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const img = $('#img'), msg = $('#msg'), ov = $('#ov'), frame = $('#frame');
+let grid = true, cross = true, paused = false, marks = [];
+try { marks = JSON.parse(localStorage.getItem('liveMarks') || '[]'); } catch (e) {}
+try { const g = JSON.parse(localStorage.getItem('liveGuides') || 'null'); if (g) { grid = g.grid; cross = g.cross; } } catch (e) {}
+
+function saveState() {
+  try { localStorage.setItem('liveMarks', JSON.stringify(marks)); localStorage.setItem('liveGuides', JSON.stringify({ grid, cross })); } catch (e) {}
+}
+
+function drawOverlay() {
+  const L = (x1, y1, x2, y2, c = 'var(--guide)', w = .25, dash = '') =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
+  let s = '';
+  if (grid) s += L(33.33, 0, 33.33, 100) + L(66.67, 0, 66.67, 100) + L(0, 33.33, 100, 33.33) + L(0, 66.67, 100, 66.67);
+  if (cross) s += L(50, 46, 50, 54, '#ff5252') + L(47.5, 50, 52.5, 50, '#ff5252');
+  marks.forEach((m, i) => {
+    s += L(m[0] - 2, m[1], m[0] + 2, m[1], '#4aa3ff') + L(m[0], m[1] - 3.5, m[0], m[1] + 3.5, '#4aa3ff');
+    s += `<text x="${m[0] + 1}" y="${m[1] - 2}" fill="#4aa3ff" font-size="3" style="font-size:13px">${i + 1}</text>`;
+  });
+  ov.innerHTML = s;
+  $('#bGrid').classList.toggle('on', grid); $('#bCross').classList.toggle('on', cross);
+}
+drawOverlay();
+
+frame.addEventListener('click', e => {
+  const r = frame.getBoundingClientRect();
+  marks.push([+((e.clientX - r.left) / r.width * 100).toFixed(2), +((e.clientY - r.top) / r.height * 100).toFixed(2)]);
+  saveState(); drawOverlay();
+});
+$('#bGrid').onclick = () => { grid = !grid; saveState(); drawOverlay(); };
+$('#bCross').onclick = () => { cross = !cross; saveState(); drawOverlay(); };
+$('#bClear').onclick = () => { marks = []; saveState(); drawOverlay(); };
+$('#bPause').onclick = () => { paused = !paused; $('#bPause').textContent = paused ? 'Weiter' : 'Pause'; $('#bPause').classList.toggle('on', paused); if (!paused) loop(); };
+$('#bTest').onclick = async () => { await fetch('/api/trigger', { method: 'POST' }); $('#bTest').textContent = 'Clip angefordert ✓'; setTimeout(() => $('#bTest').textContent = 'Testclip', 2500); };
+
+// ---- Bilder holen (~5 fps)
+let lastUrl = null;
+async function loop() {
+  if (paused) return;
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/api/preview.jpg?t=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const probe = new Image();
+      probe.onload = () => frame.classList.toggle('portrait', probe.naturalHeight > probe.naturalWidth);
+      probe.src = url;
+      img.src = url;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = url;
+      msg.style.display = 'none';
+      const age = parseFloat(r.headers.get('X-Frame-Age') || '0');
+      $('#stats').textContent = `${r.headers.get('X-Preview-Fps')} fps · Verzögerung ${Math.round(age * 1000)} ms · ${Math.round(blob.size / 1024)} KB`;
+    } else {
+      msg.style.display = '';
+      msg.textContent = 'Warte auf Live-Bild vom Handy … (App geöffnet und mit dem PC verbunden?)';
+      $('#stats').textContent = '';
+    }
+  } catch (e) {
+    msg.style.display = ''; msg.textContent = 'PC-Programm (Tracer) läuft nicht.';
+  }
+  setTimeout(loop, Math.max(0, 200 - (performance.now() - t0)));
+}
+loop();
+
+// ---- Handy-Status
+async function status() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    const p = $('#stPhone');
+    if (st.phones.length) {
+      const s = st.phones[0].status || {};
+      p.textContent = `Handy ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}`;
+      p.className = 'pill ' + ((s.fps && !s.high_speed) || (s.temp && s.temp >= 43) ? 'warn' : 'ok');
+    } else { p.textContent = 'Handy nicht verbunden'; p.className = 'pill bad'; }
+  } catch (e) { $('#stPhone').textContent = 'Server offline'; $('#stPhone').className = 'pill bad'; }
+}
+status(); setInterval(status, 2000);
+</script>
+</body>
+</html>
