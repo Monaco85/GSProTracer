@@ -66,6 +66,8 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         buildUi()
         recorder = HighSpeedRecorder(this, this)
         recorder.extraRotation = prefs.getInt("rotation", 0)
+        recorder.maxFps = prefs.getInt("maxFps", HighSpeedRecorder.TARGET_FPS)
+        recorder.zoomRatio = prefs.getFloat("zoom", 1f)
         link = PcLink(this)
         link.host = prefs.getString("host", "") ?: ""
         link.uploadPort = prefs.getInt("upload_port", 8090)
@@ -78,6 +80,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
         updateRotateButton()
+        updateFpsButton()
         applyOrientation()
         refreshStatus()
         val ticker = object : Runnable {
@@ -143,6 +146,8 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         btnOrient = button("") { toggleOrientation() }
         btnRotate = button("Drehung") { cycleRotation() }
         btnLock = button("Belichtung/Fokus sperren") { toggleLock() }
+        btnFps = button("") { toggleFps() }
+        btnZoom = button("Weitwinkel") { toggleZoom() }.apply { visibility = View.GONE }
         btnDim = button("Display dimmen") { toggleDim() }
         button("Update") { showUpdateDialog() }
         val scroller = android.widget.HorizontalScrollView(this).apply { addView(bar) }
@@ -191,6 +196,46 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         locked = !locked
         recorder.setLocked(locked)
         btnLock.text = if (locked) "Sperre lösen" else "Belichtung/Fokus sperren"
+    }
+
+    private lateinit var btnFps: Button
+    private lateinit var btnZoom: Button
+
+    private fun updateFpsButton() {
+        btnFps.text = if (recorder.maxFps >= 240) "Modus: 240 fps / 720p" else "Modus: 120 fps / 1080p"
+    }
+
+    /** 240 fps (720p) <-> 120 fps (1080p). Der 1080p-Modus kann einen groesseren Bildausschnitt haben. */
+    private fun toggleFps() {
+        val v = if (recorder.maxFps >= 240) 120 else 240
+        prefs.edit().putInt("maxFps", v).apply()
+        recorder.maxFps = v
+        updateFpsButton()
+        restartCamera()
+    }
+
+    private fun restartCamera() {
+        recorder.stop()
+        camRunning = false
+        camText = "Kamera startet neu …"
+        texture.postDelayed({ startCameraIfReady() }, 500)
+    }
+
+    /** Weitwinkel nur, wenn das Handy einen Zoom < 1,0 fuer Fremd-Apps anbietet. */
+    private fun updateZoomButton() {
+        val r = recorder.zoomRange
+        if (r == null || r.lower >= 0.99f) { btnZoom.visibility = View.GONE; return }
+        btnZoom.visibility = View.VISIBLE
+        btnZoom.text = if (recorder.zoomRatio < 0.99f) "Zoom: %.1fx (weit)".format(recorder.zoomRatio) else "Zoom: 1x → weiter"
+    }
+
+    private fun toggleZoom() {
+        val r = recorder.zoomRange ?: return
+        val z = if (recorder.zoomRatio < 0.99f) 1f else r.lower
+        prefs.edit().putFloat("zoom", z).apply()
+        recorder.setZoom(z)
+        recorder.zoomRatio = z
+        updateZoomButton()
     }
 
     private fun toggleDim() {
@@ -402,6 +447,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     override fun onCameraStatus(text: String) = ui {
         camText = text
         configureTransform(texture.width, texture.height) // Groesse steht erst jetzt fest (720p oder 1080p)
+        updateZoomButton()
     }
     override fun onCameraError(text: String) = ui { camText = "⚠ $text"; camRunning = false }
 

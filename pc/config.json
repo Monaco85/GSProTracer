@@ -7,5 +7,8 @@
   "clip_pre_seconds": 4.0,
   "clip_post_seconds": 0.5,
   "trigger_delay_seconds": 0.0,
-  "shots_dir": "shots"
+  "shots_dir": "shots",
+  "exports_dir": "exports",
+  "export_playback_fps": 30,
+  "ffmpeg_path": ""
 }

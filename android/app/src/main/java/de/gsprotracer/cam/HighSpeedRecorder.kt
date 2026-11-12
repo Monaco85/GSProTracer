@@ -22,6 +22,7 @@ import android.util.Size
 import android.view.Surface
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -89,6 +90,15 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
     @Volatile var extraRotation = 0
     /** Aktuelle Bildschirmdrehung in Grad (0 = hochkant, 90 = quer). Bestimmt die Video-Ausrichtung. */
     @Volatile var displayRotationDeg = 0
+    /** Hoechste gewuenschte Bildrate: 240 (720p) oder 120 (dann 1080p, evtl. groesserer Bildwinkel). */
+    @Volatile var maxFps = TARGET_FPS
+    /** Zoom (Android 11+). < 1.0 = Weitwinkel, nur wenn das Handy es fuer Fremd-Apps anbietet. */
+    @Volatile var zoomRatio = 1f
+    @Volatile var zoomRange: Range<Float>? = null; private set
+
+    fun setZoom(ratio: Float) {
+        camHandler.post { zoomRatio = ratio; applyRepeating() }
+    }
 
     /** Drehung fuer die MP4-Datei (Rueckkamera): Sensor - Display + Zusatzdrehung. */
     private fun orientationHint(m: Mode) =
@@ -109,10 +119,34 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
 
     // ------------------------------------------------------------------ Modus-Auswahl
 
+    /** Horizontaler Bildwinkel des vollen Sensors in Grad (ohne Crop des Video-Modus). */
+    private fun fovInfo(ch: CameraCharacteristics): String {
+        val f = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: return ""
+        val s = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return ""
+        val fov = Math.toDegrees(2 * Math.atan(s.width / (2.0 * f)))
+        return " f=%.2fmm Bildwinkel %.0f°".format(Locale.US, f, fov)
+    }
+
+    private fun zoomInfo(ch: CameraCharacteristics): String {
+        if (android.os.Build.VERSION.SDK_INT < 30) return ""
+        val r = ch.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) ?: return ""
+        return " Zoom %.2f–%.1fx".format(Locale.US, r.lower, r.upper)
+    }
+
     fun describeCameras(): String {
         val sb = StringBuilder()
+        val listed = manager.cameraIdList.toSet()
+        // Xiaomi versteckt Weitwinkel/Makro oft vor Fremd-Apps - trotzdem nachsehen
+        val hidden = (0..9).map { it.toString() }.filter { it !in listed }.mapNotNull { id ->
+            try { id to manager.getCameraCharacteristics(id) } catch (_: Exception) { null }
+        }
+        for ((id, hch) in hidden) {
+            sb.append("Kamera $id (versteckt)${fovInfo(hch)}\n")
+        }
         for (id in manager.cameraIdList) {
             val ch = manager.getCameraCharacteristics(id)
+            val phys = if (android.os.Build.VERSION.SDK_INT >= 28) ch.physicalCameraIds else emptySet()
+            if (phys.isNotEmpty()) sb.append("Kamera $id ist Multi-Kamera aus ${phys.joinToString("/")}\n")
             val facing = when (ch.get(CameraCharacteristics.LENS_FACING)) {
                 CameraCharacteristics.LENS_FACING_BACK -> "hinten"
                 CameraCharacteristics.LENS_FACING_FRONT -> "vorne"
@@ -120,7 +154,7 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
             }
             val caps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: IntArray(0)
             val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            sb.append("Kamera $id ($facing)")
+            sb.append("Kamera $id ($facing)${fovInfo(ch)}${zoomInfo(ch)}")
             if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO) && map != null) {
                 val hs = map.highSpeedVideoSizes.joinToString(", ") { s ->
                     val r = map.getHighSpeedVideoFpsRangesFor(s).filter { it.lower == it.upper }
@@ -145,7 +179,8 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
      */
     private fun findMode(): Mode? {
         var best: Mode? = null
-        fun score(m: Mode) = (if (m.highSpeed) 100_000 else 0) + m.fps * 10 + (if (m.size == TARGET_SIZE) 1 else 0)
+        // bei gleicher Bildrate die groessere Aufloesung (1080p@120 kann mehr Bildwinkel haben als 720p@240)
+        fun score(m: Mode) = (if (m.highSpeed) 10_000_000 else 0) + m.fps * 10_000 + m.size.width * m.size.height / 1000
         for (id in manager.cameraIdList) {
             val ch = manager.getCameraCharacteristics(id)
             if (ch.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_BACK) continue
@@ -157,7 +192,7 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
                 for (size in HS_SIZES) {
                     if (!map.highSpeedVideoSizes.contains(size)) continue
                     val r = map.getHighSpeedVideoFpsRangesFor(size)
-                        .filter { it.lower == it.upper && it.upper <= TARGET_FPS }
+                        .filter { it.lower == it.upper && it.upper <= maxFps }
                         .maxByOrNull { it.upper } ?: continue
                     val m = Mode(id, size, r.upper, true, r, orient)
                     if (best == null || score(m) > score(best)) best = m
@@ -191,6 +226,9 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
                     return@post
                 }
                 mode = m
+                zoomRange = if (android.os.Build.VERSION.SDK_INT >= 30)
+                    manager.getCameraCharacteristics(m.cameraId).get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                else null
                 clockOffsetUs = Long.MAX_VALUE
                 fpsWindowStart = 0L
                 fpsWindowFrames = 0
@@ -321,6 +359,10 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
             encoderSurface?.let { b.addTarget(it) }
             b.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, m.fpsRange)
+            val zr = zoomRange
+            if (android.os.Build.VERSION.SDK_INT >= 30 && zr != null) {
+                b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio.coerceIn(zr.lower, zr.upper))
+            }
             b.set(CaptureRequest.CONTROL_AE_LOCK, locked)
             b.set(CaptureRequest.CONTROL_AWB_LOCK, locked)
             b.set(
