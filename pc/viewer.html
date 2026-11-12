@@ -114,8 +114,19 @@ const kmh = v => (typeof v === 'number' && v) ? v * KMH : v;
 
 // ---------------------------------------------------------------- status
 async function poll() {
+  if (location.protocol === 'file:') {
+    $('#stProxy').textContent = 'Seite bitte über http://localhost:8090 öffnen'; $('#stProxy').className = 'pill bad'; return;
+  }
+  let st, list;
   try {
-    const st = await (await fetch('/api/status')).json();
+    st = await (await fetch('/api/status', { cache: 'no-store' })).json();
+    list = await (await fetch('/api/shots', { cache: 'no-store' })).json();
+  } catch (e) {
+    $('#stProxy').textContent = 'Tracer-Programm nicht erreichbar'; $('#stProxy').className = 'pill bad';
+    $('#stPhone').textContent = 'Handy ?'; $('#stPhone').className = 'pill';
+    return;
+  }
+  try {
     cfg = st.config;
     const p = $('#stProxy');
     p.textContent = st.proxy_connected ? 'Connector ✓' : 'Connector nicht verbunden';
@@ -130,7 +141,6 @@ async function poll() {
     } else { ph.textContent = 'Handy nicht verbunden'; ph.className = 'pill bad'; }
     $('#stClub').textContent = st.player && st.player.Club ? 'Schläger: ' + st.player.Club : '–';
 
-    const list = await (await fetch('/api/shots')).json();
     const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.notes.impact_time, s.export && (s.export.file || s.export.error)]));
     if (sig !== poll.sig) {
       poll.sig = sig; shots = list; renderList(); renderStats();
@@ -142,7 +152,7 @@ async function poll() {
       if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video)) select(u.id); else if (u) { cur = u; renderExport(); } }
       poll.init = true;
     }
-  } catch (e) { $('#stProxy').textContent = 'Server offline'; $('#stProxy').className = 'pill bad'; }
+  } catch (e) { console.error('Anzeigefehler', e); }
 }
 setInterval(poll, 1500); poll();
 

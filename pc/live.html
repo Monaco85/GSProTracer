@@ -126,7 +126,7 @@ async function status() {
       p.textContent = `Handy ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}`;
       p.className = 'pill ' + ((s.fps && !s.high_speed) || (s.temp && s.temp >= 43) ? 'warn' : 'ok');
     } else { p.textContent = 'Handy nicht verbunden'; p.className = 'pill bad'; }
-  } catch (e) { $('#stPhone').textContent = 'Server offline'; $('#stPhone').className = 'pill bad'; }
+  } catch (e) { $('#stPhone').textContent = location.protocol === 'file:' ? 'Seite bitte über http://localhost:8090/live öffnen' : 'Tracer-Programm nicht erreichbar'; $('#stPhone').className = 'pill bad'; }
 }
 status(); setInterval(status, 2000);
 </script>
