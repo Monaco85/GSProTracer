@@ -27,6 +27,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from exporter import MPH_TO_KMH, Exporter
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 VIEWER_PATH = os.path.join(BASE_DIR, "viewer.html")
@@ -45,6 +47,9 @@ DEFAULT_CONFIG = {
     "clip_post_seconds": 0.5,
     "trigger_delay_seconds": 0.0,
     "shots_dir": "shots",
+    "exports_dir": "exports",          # fertige Videos mit eingeblendeten Schlagdaten
+    "export_playback_fps": 30,         # 240 fps -> 30 fps = Zeitlupe 1/8, jedes Bild sichtbar
+    "ffmpeg_path": "",                 # leer = automatisch suchen
 }
 
 
@@ -127,6 +132,7 @@ class ShotStore:
             "shot": self.read_json(shot_id, "shot.json"),
             "video": self.read_json(shot_id, "video.json"),
             "notes": self.read_json(shot_id, "notes.json") or {},
+            "export": self.read_json(shot_id, "export.json"),
             "has_video": os.path.exists(self.path(shot_id, "clip.mp4")),
         }
 
@@ -326,6 +332,7 @@ class TracerApp:
         self.store = ShotStore(self.cfg.shots_dir)
         self.hub = PhoneHub(self.cfg["phone_control_port"])
         self.proxy = GSProProxy(self.cfg, self.handle_shot, self.handle_gspro_msg)
+        self.exporter = Exporter(self.store, self.cfg)
         self.player = {}
         self.last_shot_id = None
         # Live-Bild vom Handy (nur solange die Live-Seite offen ist)
@@ -400,6 +407,9 @@ class TracerApp:
             "phones": self.hub.snapshot(),
             "player": self.player,
             "last_shot_id": self.last_shot_id,
+            "ffmpeg": bool(self.exporter.ffmpeg),
+            "exporting": self.exporter.busy,
+            "exports_dir": self.exporter.out_dir,
             "config": dict(self.cfg.data),
         }
 
@@ -423,11 +433,13 @@ class TracerApp:
     def run(self):
         self.hub.start()
         self.proxy.start()
+        self.exporter.start()
         handler = make_handler(self)
         httpd = QuietHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
         httpd.daemon_threads = True
         log.info("Analyse-Oberflaeche: http://localhost:%d", self.cfg["http_port"])
         log.info("Shots werden gespeichert in: %s", self.store.root)
+        log.info("Videos mit Schlagdaten (km/h) in: %s", self.exporter.out_dir)
         log.info("PC-IP-Adressen fuer die Handy-App: %s", ", ".join(local_ips()) or "?")
         httpd.serve_forever()
 
@@ -527,13 +539,19 @@ def make_handler(app: TracerApp):
                 m = re.match(r"^/shots/([A-Za-z0-9_-]+)/clip\.mp4$", p)
                 if m:
                     return self.send_video(app.store.path(m.group(1), "clip.mp4"))
+                m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export\.mp4$", p)
+                if m:
+                    ex = app.store.read_json(m.group(1), "export.json") or {}
+                    if not ex.get("file"):
+                        return self.send_text("noch kein Export", 404)
+                    return self.send_video(os.path.join(app.exporter.out_dir, ex["file"]), download_name=ex["file"])
                 self.send_text("not found", 404)
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except ValueError as e:
                 self.send_text(str(e), 400)
 
-        def send_video(self, path):
+        def send_video(self, path, download_name=None):
             if not os.path.exists(path):
                 return self.send_text("no video", 404)
             size = os.path.getsize(path)
@@ -560,6 +578,8 @@ def make_handler(app: TracerApp):
             self.send_response(status)
             self.send_header("Content-Type", "video/mp4")
             self.send_header("Accept-Ranges", "bytes")
+            if download_name:
+                self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
             self.send_header("Content-Length", str(length))
             if status == 206:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -579,16 +599,26 @@ def make_handler(app: TracerApp):
             w = csv.writer(out, delimiter=";")
             cols_ball = ["Speed", "VLA", "HLA", "TotalSpin", "SpinAxis", "Backspin", "SideSpin"]
             cols_club = ["Speed", "AngleOfAttack", "FaceToTarget", "Path", "HorizontalFaceImpact"]
-            w.writerow(["shot_id", "zeit", "schlaeger", "video"] + [f"ball_{c}" for c in cols_ball]
-                       + [f"club_{c}" for c in cols_club] + ["notiz"])
+            names = {"Speed": "Speed_kmh"}
+            w.writerow(["shot_id", "zeit", "schlaeger", "video", "smash"]
+                       + [f"ball_{names.get(c, c)}" for c in cols_ball]
+                       + [f"club_{names.get(c, c)}" for c in cols_club] + ["notiz"])
+
+            def val(d, c):
+                v = d.get(c, "")
+                if c == "Speed" and isinstance(v, (int, float)):
+                    v = round(v * MPH_TO_KMH, 1)
+                return str(v).replace(".", ",")
             for s in app.store.list():
                 rec = s["shot"] or {}
                 pl = rec.get("payload") or {}
                 bd, cd = pl.get("BallData") or {}, pl.get("ClubData") or {}
+                bs, cs = bd.get("Speed"), cd.get("Speed")
+                smash = f"{bs / cs:.2f}".replace(".", ",") if isinstance(bs, (int, float)) and isinstance(cs, (int, float)) and cs else ""
                 w.writerow([s["id"], rec.get("received_at", ""), rec.get("club") or "",
-                            "ja" if s["has_video"] else "nein"]
-                           + [str(bd.get(c, "")).replace(".", ",") for c in cols_ball]
-                           + [str(cd.get(c, "")).replace(".", ",") for c in cols_club]
+                            "ja" if s["has_video"] else "nein", smash]
+                           + [val(bd, c) for c in cols_ball]
+                           + [val(cd, c) for c in cols_club]
                            + [s["notes"].get("text", "")])
             self.send_text("﻿" + out.getvalue(), ctype="text/csv; charset=utf-8",
                            extra={"Content-Disposition": 'attachment; filename="gspro_shots.csv"'})
@@ -610,6 +640,13 @@ def make_handler(app: TracerApp):
                 if u.path == "/api/config":
                     app.cfg.update(json.loads(self.read_body() or b"{}"))
                     return self.send_json(app.cfg.data)
+                m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export$", u.path)
+                if m:
+                    self.read_body()
+                    if not app.exporter.ffmpeg:
+                        return self.send_text("FFmpeg fehlt", 503)
+                    app.exporter.enqueue(m.group(1))
+                    return self.send_json({"queued": True})
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/notes$", u.path)
                 if m:
                     sid = m.group(1)
@@ -670,6 +707,7 @@ def make_handler(app: TracerApp):
                 app.store.write_json(sid, "shot.json", {"received_at": meta["uploaded_at"],
                                                         "test": True, "payload": {}})
             log.info("Video empfangen: %s (%.1f MB, %s fps)", sid, length / 1e6, meta["fps"])
+            app.exporter.enqueue(sid)
             self.send_json({"ok": True})
 
         # ---- DELETE

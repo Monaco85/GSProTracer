@@ -18,6 +18,7 @@ android/captures/
 __pycache__/
 *.pyc
 pc/shots/
+pc/exports/
 
 # OS
 Thumbs.db

@@ -80,6 +80,7 @@ dialog::backdrop{background:#0008}
     <h2>Balldaten</h2><table id="tBall"></table>
     <h2>Schlägerdaten</h2><table id="tClub"></table>
     <h2>Video</h2><div id="vInfo" class="small">–</div>
+    <h2>Video mit Schlagdaten</h2><div id="exInfo" class="small">–</div>
     <h2>Notiz</h2><textarea id="note" placeholder="z.B. Griff neutraler, Ball weiter rechts …"></textarea>
     <div class="row"><button id="bDel">Schuss löschen</button></div>
     <h2>Durchschnitt pro Schläger</h2><table id="tStats"></table>
@@ -108,6 +109,8 @@ const RATES = [1, 0.5, 0.25, 0.125, 0.0625];
 
 const fmt = (v, d = 1) => (v === undefined || v === null || v === '') ? '–' : Number(v).toFixed(d).replace('.', ',');
 const fps = () => (cur && cur.video && cur.video.fps) || 240;
+const KMH = 1.609344; // GSPro/R10 liefern mph
+const kmh = v => (typeof v === 'number' && v) ? v * KMH : v;
 
 // ---------------------------------------------------------------- status
 async function poll() {
@@ -128,7 +131,7 @@ async function poll() {
     $('#stClub').textContent = st.player && st.player.Club ? 'Schläger: ' + st.player.Club : '–';
 
     const list = await (await fetch('/api/shots')).json();
-    const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.notes.impact_time]));
+    const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.notes.impact_time, s.export && (s.export.file || s.export.error)]));
     if (sig !== poll.sig) {
       poll.sig = sig; shots = list; renderList(); renderStats();
       const newest = list[0];
@@ -136,7 +139,7 @@ async function poll() {
         select(newest.id, true);
       }
       if (newest && newest.has_video) lastSeenId = newest.id;
-      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video)) select(u.id); else if (u) cur = u; }
+      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video)) select(u.id); else if (u) { cur = u; renderExport(); } }
       poll.init = true;
     }
   } catch (e) { $('#stProxy').textContent = 'Server offline'; $('#stProxy').className = 'pill bad'; }
@@ -151,10 +154,10 @@ function renderList() {
     const t = m[0] ? `${m[4]}:${m[5]}:${m[6]}` : '';
     const d = m[0] ? `${m[3]}.${m[2]}.` : s.id;
     const club = (s.shot && s.shot.club) || '';
-    const main = s.shot && s.shot.test ? 'Testclip' : `${fmt(b.Speed)} mph · ${fmt(b.VLA)}° · ${fmt(b.TotalSpin, 0)} rpm`;
+    const main = s.shot && s.shot.test ? 'Testclip' : `${fmt(kmh(b.Speed))} km/h · ${fmt(b.VLA)}° · ${fmt(b.TotalSpin, 0)} rpm`;
     return `<div class="shot ${cur && cur.id === s.id ? 'sel' : ''}" data-id="${s.id}">
       <div class="v">${main}</div><div class="t">${club}</div>
-      <div class="t">${d} ${t}${c.Speed ? ' · Club ' + fmt(c.Speed) + ' mph' : ''}</div>
+      <div class="t">${d} ${t}${c.Speed ? ' · Club ' + fmt(kmh(c.Speed)) + ' km/h' : ''}</div>
       <div>${s.has_video ? '🎬' : '<span class="nv">kein Video</span>'}</div></div>`;
   }).join('') || '<div class="shot"><div class="t">Noch keine Schüsse. Schlag mit dem R10 oder „Testclip“ drücken.</div></div>';
 }
@@ -166,12 +169,12 @@ function renderStats() {
     if (!s.shot || s.shot.test) continue;
     const pl = s.shot.payload || {}, b = pl.BallData || {}, c = pl.ClubData || {};
     const k = s.shot.club || '?';
-    (g[k] = g[k] || []).push({ bs: b.Speed, cs: c.Speed, vla: b.VLA, sp: b.TotalSpin });
+    (g[k] = g[k] || []).push({ bs: kmh(b.Speed), cs: kmh(c.Speed), vla: b.VLA, sp: b.TotalSpin });
   }
   const avg = (a, k) => { const v = a.map(x => x[k]).filter(x => typeof x === 'number' && x); return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null; };
   const rows = Object.entries(g).map(([k, a]) =>
     `<tr><td>${k} <span class="small">(${a.length})</span></td><td class="n">${fmt(avg(a, 'bs'))}</td><td class="n">${fmt(avg(a, 'cs'))}</td><td class="n">${fmt(avg(a, 'vla'))}</td><td class="n">${fmt(avg(a, 'sp'), 0)}</td></tr>`).join('');
-  $('#tStats').innerHTML = rows ? `<tr class="small"><td></td><td class="n">Ball</td><td class="n">Club</td><td class="n">VLA</td><td class="n">Spin</td></tr>` + rows : '<tr><td class="small">–</td></tr>';
+  $('#tStats').innerHTML = rows ? `<tr class="small"><td></td><td class="n">Ball km/h</td><td class="n">Club km/h</td><td class="n">VLA</td><td class="n">Spin</td></tr>` + rows : '<tr><td class="small">–</td></tr>';
 }
 
 // ---------------------------------------------------------------- select
@@ -180,14 +183,15 @@ function select(id, autoplay) {
   renderList();
   const pl = (cur.shot && cur.shot.payload) || {}, b = pl.BallData || {}, c = pl.ClubData || {};
   const row = (l, v, u) => `<tr><td>${l}</td><td class="n">${v} <span class="small">${u}</span></td></tr>`;
-  $('#tBall').innerHTML = row('Ballgeschw.', fmt(b.Speed), 'mph') + row('Abflugwinkel (VLA)', fmt(b.VLA), '°') +
+  $('#tBall').innerHTML = row('Ballgeschw.', fmt(kmh(b.Speed)), 'km/h') + row('Abflugwinkel (VLA)', fmt(b.VLA), '°') +
     row('Richtung (HLA)', fmt(b.HLA), '°') + row('Spin gesamt', fmt(b.TotalSpin, 0), 'rpm') +
     row('Spinachse', fmt(b.SpinAxis), '°') + row('Backspin', fmt(b.Backspin, 0), 'rpm') + row('Sidespin', fmt(b.SideSpin, 0), 'rpm');
-  $('#tClub').innerHTML = row('Schlägerkopf', fmt(c.Speed), 'mph') + row('Angle of Attack', fmt(c.AngleOfAttack), '°') +
+  $('#tClub').innerHTML = row('Schlägerkopf', fmt(kmh(c.Speed)), 'km/h') + row('Angle of Attack', fmt(c.AngleOfAttack), '°') +
     row('Club Path', fmt(c.Path), '°') + row('Face to Target', fmt(c.FaceToTarget), '°') +
     row('Face to Path', fmt(c.HorizontalFaceImpact), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '');
   const v = cur.video;
   $('#vInfo').textContent = v ? `${v.width}×${v.height} · ${fmt(v.fps, 0)} fps · ${fmt(v.duration, 2)} s · ${fmt(v.bytes / 1e6, 1)} MB · ${v.device || ''}` : 'Kein Video zu diesem Schuss.';
+  renderExport();
   $('#note').value = cur.notes.text || '';
   $('#empty').style.display = cur.has_video ? 'none' : '';
   if (cur.has_video) {
@@ -202,6 +206,22 @@ function select(id, autoplay) {
     };
   } else { vid.removeAttribute('src'); vid.load(); }
   draw();
+}
+
+function renderExport() {
+  const el = $('#exInfo');
+  if (!cur || !cur.has_video) { el.textContent = '–'; return; }
+  const ex = cur.export;
+  if (ex && ex.file) {
+    el.innerHTML = `Gespeichert in <code>pc\\exports\\</code>:<br><a href="/api/shots/${cur.id}/export.mp4" style="color:var(--acc)">${ex.file}</a>` +
+      ` <span>(Zeitlupe 1/${ex.slowmo})</span><div class="row"><button id="bReExp">Neu erstellen</button></div>`;
+  } else if (ex && ex.error) {
+    el.innerHTML = `<span style="color:var(--bad)">Fehler: ${ex.error.replace(/</g, '&lt;')}</span><div class="row"><button id="bReExp">Nochmal versuchen</button></div>`;
+  } else {
+    el.textContent = 'wird erstellt …';
+  }
+  const b = $('#bReExp');
+  if (b) b.onclick = async () => { await fetch(`/api/shots/${cur.id}/export`, { method: 'POST' }); cur.export = null; poll.sig = null; el.textContent = 'wird erstellt …'; };
 }
 
 // ---------------------------------------------------------------- player

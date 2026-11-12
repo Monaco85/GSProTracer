@@ -90,6 +90,11 @@ Tempo 1× bis 1/16 (bei 240 fps entspricht 1/8 ungefähr echter 30-fps-Wiedergab
 Rechts: Ball-/Schlägerdaten, Smash-Faktor, Notiz pro Schuss, Durchschnitt pro Schläger (Schläger kommt aus GSPro).
 *CSV-Export* öffnet sich direkt in Excel (Semikolon, deutsches Komma).
 
+**Video mit Schlagdaten:** Sobald ein Clip ankommt, erstellt der PC automatisch ein fertiges Video mit
+eingeblendeten Werten (Geschwindigkeiten in **km/h**) als Zeitlupe 1/8 (jedes 240-fps-Bild sichtbar) in
+`pc\exports\`, z. B. `2026-11-12_12-40-04_7I_196kmh.mp4`. Braucht FFmpeg (`winget install Gyan.FFmpeg`).
+Tempo über `export_playback_fps` in `pc\config.json` (30 = 1/8, 240 = Echtzeit).
+
 Dateien: `pc\shots\<JJJJMMTT-hhmmss-nn>\` → `clip.mp4`, `shot.json` (Original-Daten des Connectors),
 `video.json`, `notes.json`. Einstellungen: `pc\config.json`.
 
