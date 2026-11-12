@@ -60,6 +60,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        applyOrientation()
         clipDir = File(getExternalFilesDir(null) ?: filesDir, "clips").apply { mkdirs() }
 
         buildUi()
@@ -77,6 +78,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
         updateRotateButton()
+        applyOrientation()
         refreshStatus()
         val ticker = object : Runnable {
             override fun run() { refreshStatus(); status.postDelayed(this, 1000) }
@@ -92,9 +94,10 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         texture = TextureView(this)
         root.addView(texture, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
         root.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
-            // groesstes 16:9-Rechteck -> komplettes Bild sichtbar, nichts abgeschnitten
+            // groesstes 16:9- (quer) bzw. 9:16-Rechteck (hochkant) -> komplettes Bild sichtbar
             val w = r - l; val h = b - t
-            val (tw, th) = if (w * 9 > h * 16) Pair(h * 16 / 9, h) else Pair(w, w * 9 / 16)
+            val (aw, ah) = if (h > w) Pair(9, 16) else Pair(16, 9)
+            val (tw, th) = if (w * ah > h * aw) Pair(h * aw / ah, h) else Pair(w, w * ah / aw)
             val lp = texture.layoutParams as FrameLayout.LayoutParams
             if (lp.width != tw || lp.height != th) {
                 lp.width = tw; lp.height = th
@@ -137,6 +140,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         }.also { bar.addView(it) }
         button("Verbinden") { applyHost() }
         button("Testclip") { onTrigger("test-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()), 2.0, 1.0, 0.0) }
+        btnOrient = button("") { toggleOrientation() }
         btnRotate = button("Drehung") { cycleRotation() }
         btnLock = button("Belichtung/Fokus sperren") { toggleLock() }
         btnDim = button("Display dimmen") { toggleDim() }
@@ -154,6 +158,22 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         link.reconnect()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(ipField.windowToken, 0)
         ipField.clearFocus()
+    }
+
+    private lateinit var btnOrient: Button
+    private fun isPortrait() = prefs.getBoolean("portrait", true)
+
+    /** Hochkant (Standard) oder quer. Das Video folgt automatisch der Bildschirm-Ausrichtung. */
+    private fun applyOrientation() {
+        requestedOrientation = if (isPortrait()) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        if (::btnOrient.isInitialized) btnOrient.text = if (isPortrait()) "Format: hochkant" else "Format: quer"
+    }
+
+    private fun toggleOrientation() {
+        prefs.edit().putBoolean("portrait", !isPortrait()).apply()
+        applyOrientation()
+        texture.postDelayed({ configureTransform(texture.width, texture.height) }, 400)
     }
 
     private fun cycleRotation() {
@@ -241,6 +261,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     private fun configureTransform(viewW: Int, viewH: Int) {
         if (viewW == 0 || viewH == 0) return
         val rotation = displayRotation()
+        recorder.displayRotationDeg = rotation * 90
         val size = recorder.mode?.size ?: HighSpeedRecorder.TARGET_SIZE
         val matrix = Matrix()
         val viewRect = RectF(0f, 0f, viewW.toFloat(), viewH.toFloat())
@@ -278,7 +299,9 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
      */
     private fun sendPreviewFrame() {
         if (!texture.isAvailable || texture.width == 0) return
-        val w = 640; val h = 360
+        val portrait = texture.height > texture.width
+        val w = if (portrait) 360 else 640
+        val h = if (portrait) 640 else 360
         val sx = w.toFloat() / texture.width
         val sy = h.toFloat() / texture.height
         val m = Matrix().apply { setScale(1 / sx, 1 / sy); postConcat(viewMatrix); postScale(sx, sy) }
@@ -291,6 +314,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
                 raw.recycle()
                 val out = if (rot != 0) {
                     val r = android.graphics.Bitmap.createBitmap(upright, 0, 0, w, h, Matrix().apply { postRotate(rot.toFloat()) }, true)
+                    // (Zusatzdrehung nur fuer kopfueber/seitlich montiertes Handy)
                     upright.recycle(); r
                 } else upright
                 val bos = java.io.ByteArrayOutputStream()

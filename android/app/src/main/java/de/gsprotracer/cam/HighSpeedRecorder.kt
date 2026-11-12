@@ -87,6 +87,12 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
     @Volatile var cameraInfo = ""; private set
     /** Zusaetzliche Drehung des Videos (0/90/180/270), z.B. wenn das Handy kopfueber montiert ist. */
     @Volatile var extraRotation = 0
+    /** Aktuelle Bildschirmdrehung in Grad (0 = hochkant, 90 = quer). Bestimmt die Video-Ausrichtung. */
+    @Volatile var displayRotationDeg = 0
+
+    /** Drehung fuer die MP4-Datei (Rueckkamera): Sensor - Display + Zusatzdrehung. */
+    private fun orientationHint(m: Mode) =
+        ((m.sensorOrientation - displayRotationDeg + extraRotation) % 360 + 360) % 360
     @Volatile private var outputFormat: MediaFormat? = null
     /** min(elapsedRealtime - pts) -> Abbildung Wanduhr <-> Frame-Zeitstempel. */
     @Volatile private var clockOffsetUs = Long.MAX_VALUE
@@ -430,10 +436,11 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
         if (samples.size < 10) throw IllegalStateException("zu wenige Frames (${samples.size})")
 
         outDir.mkdirs()
+        val hint = orientationHint(m)
         val tmp = File(outDir, "$shotId.mp4.tmp")
         val muxer = MediaMuxer(tmp.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {
-            muxer.setOrientationHint(((m.sensorOrientation - 90 + extraRotation) % 360 + 360) % 360)
+            muxer.setOrientationHint(hint)
             val track = muxer.addTrack(fmt)
             muxer.start()
             val first = samples.first().ptsUs
@@ -456,7 +463,7 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
         val file = File(outDir, "$shotId.mp4")
         if (!tmp.renameTo(file)) throw IllegalStateException("Umbenennen fehlgeschlagen")
         val first = samples.first().ptsUs
-        val rotated = (m.sensorOrientation - 90 + extraRotation) % 180 != 0
+        val rotated = hint % 180 != 0
         listener.onClipReady(
             ClipInfo(
                 file = file,
