@@ -1,0 +1,24 @@
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/*.iml
+android/captures/
+*.apk
+*.aab
+
+# Signaturschluessel niemals einchecken
+*.jks
+*.keystore
+
+# Python / PC
+__pycache__/
+*.pyc
+pc/shots/
+
+# OS
+Thumbs.db
+.DS_Store

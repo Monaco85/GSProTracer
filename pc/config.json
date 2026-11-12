@@ -1,0 +1,11 @@
+{
+  "proxy_listen_port": 9211,
+  "gspro_host": "127.0.0.1",
+  "gspro_port": 921,
+  "phone_control_port": 9300,
+  "http_port": 8090,
+  "clip_pre_seconds": 4.0,
+  "clip_post_seconds": 0.5,
+  "trigger_delay_seconds": 0.0,
+  "shots_dir": "shots"
+}

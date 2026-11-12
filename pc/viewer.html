@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GSPro Tracer</title>
+<style>
+:root{--bg:#0f1214;--panel:#181c1f;--panel2:#20262a;--line:#2c3439;--text:#e6ebee;--muted:#8b979e;--acc:#3fb97a;--warn:#e0a63a;--bad:#e05a4f;--mark:#4aa3ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 12px 0 0;letter-spacing:.5px}
+.pill{padding:3px 10px;border-radius:99px;background:var(--panel2);color:var(--muted);font-size:12px;white-space:nowrap}
+.pill.ok{color:#08150e;background:var(--acc)} .pill.bad{color:#fff;background:var(--bad)} .pill.warn{color:#1a1200;background:var(--warn)}
+button,select,input{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px}
+button{cursor:pointer} button:hover{border-color:var(--muted)} button.on{background:var(--acc);color:#08150e;border-color:var(--acc)}
+input[type=number]{width:70px}
+.spacer{flex:1}
+main{display:grid;grid-template-columns:280px 1fr 300px;gap:0;height:calc(100vh - 54px)}
+#list{overflow:auto;border-right:1px solid var(--line)}
+.shot{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px}
+.shot:hover{background:var(--panel)} .shot.sel{background:var(--panel2);box-shadow:inset 3px 0 var(--acc)}
+.shot .t{color:var(--muted);font-size:12px} .shot .v{font-variant-numeric:tabular-nums}
+.shot .nv{color:var(--warn);font-size:11px}
+#center{display:flex;flex-direction:column;min-width:0;padding:12px;gap:8px}
+#stage{position:relative;flex:1;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+#stage video{max-width:100%;max-height:100%;display:block}
+#stage canvas{position:absolute;cursor:crosshair}
+#empty{color:var(--muted);position:absolute}
+#bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#tl{position:relative;height:28px;background:var(--panel);border-radius:6px;cursor:pointer}
+#tl .prog{position:absolute;top:0;bottom:0;left:0;background:#2b3a33;border-radius:6px}
+#tl .mk{position:absolute;top:0;bottom:0;width:2px}
+#tl .mk span{position:absolute;top:-1px;left:4px;font-size:10px;white-space:nowrap}
+#time{font-variant-numeric:tabular-nums;color:var(--muted);min-width:190px}
+#side{overflow:auto;border-left:1px solid var(--line);padding:12px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:14px 0 6px}
+table{width:100%;border-collapse:collapse} td{padding:3px 0;border-bottom:1px solid var(--line)} td.n{text-align:right;font-variant-numeric:tabular-nums}
+textarea{width:100%;min-height:60px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+.small{font-size:12px;color:var(--muted)}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:520px}
+dialog::backdrop{background:#0008}
+@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}#list{max-height:220px}#stage{min-height:300px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>⛳ GSPro Tracer</h1>
+  <span id="stProxy" class="pill">Connector …</span>
+  <span id="stPhone" class="pill">Handy …</span>
+  <span id="stClub" class="pill" title="Aktueller Schläger in GSPro">–</span>
+  <span class="spacer"></span>
+  <label class="small"><input type="checkbox" id="autoplay" checked> neuen Schuss automatisch abspielen</label>
+  <button id="btnTest" title="Trigger ohne R10 auslösen (Kamera ausrichten, testen)">Testclip</button>
+  <button id="btnSettings">Einstellungen</button>
+  <a href="/api/export.csv"><button>CSV-Export</button></a>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="center">
+    <div id="stage"><div id="empty">Noch kein Schuss ausgewählt</div><video id="vid" playsinline muted preload="auto"></video><canvas id="cv"></canvas></div>
+    <div id="tl"><div class="prog" id="prog"></div></div>
+    <div id="bar">
+      <button id="bPlay" title="Leertaste">▶</button>
+      <button id="bPrev" title="Frame zurück (← oder ,)">◀ 1F</button>
+      <button id="bNext" title="Frame vor (→ oder .)">1F ▶</button>
+      <span class="small">Tempo</span>
+      <span id="rates"></span>
+      <label class="small"><input type="checkbox" id="loop" checked> Loop</label>
+      <button id="bTrig" title="Zum Zeitpunkt springen, an dem die R10-Daten ankamen">→ R10</button>
+      <button id="bImpact" title="Aktuelles Bild als Treffmoment markieren (für Kalibrierung)">Impact hier (I)</button>
+      <button id="bGoImpact">→ Impact</button>
+      <button id="bClear" title="Gezeichnete Linien entfernen">Linien ✕</button>
+      <span id="time"></span>
+    </div>
+  </div>
+  <div id="side">
+    <h2>Balldaten</h2><table id="tBall"></table>
+    <h2>Schlägerdaten</h2><table id="tClub"></table>
+    <h2>Video</h2><div id="vInfo" class="small">–</div>
+    <h2>Notiz</h2><textarea id="note" placeholder="z.B. Griff neutraler, Ball weiter rechts …"></textarea>
+    <div class="row"><button id="bDel">Schuss löschen</button></div>
+    <h2>Durchschnitt pro Schläger</h2><table id="tStats"></table>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <h3 style="margin-top:0">Clip-Einstellungen</h3>
+  <p class="small">Der R10 liefert die Daten erst nach dem Treffmoment. Das Handy nimmt deshalb dauerhaft in einen Ringpuffer auf und schneidet beim Eintreffen der Daten rückwirkend aus:<br>
+  Clip = [Ankunft − Verzögerung − Vorlauf … Ankunft − Verzögerung + Nachlauf]</p>
+  <div class="row"><label style="width:220px">Vorlauf vor Impact (s)</label><input type="number" step="0.1" id="cPre"></div>
+  <div class="row"><label style="width:220px">Nachlauf nach Impact (s)</label><input type="number" step="0.1" id="cPost"></div>
+  <div class="row"><label style="width:220px">R10-Verzögerung (s)</label><input type="number" step="0.05" id="cDelay"></div>
+  <h3>Kalibrierung</h3>
+  <p class="small">Bei einigen Schüssen den Treffmoment mit „Impact hier“ markieren. Daraus wird die R10-Verzögerung berechnet.</p>
+  <div id="calib" class="small">–</div>
+  <div class="row"><button id="bApplyCal">Vorschlag übernehmen (+ Clip 1,5 s / 1,0 s)</button></div>
+  <div class="row" style="justify-content:flex-end;margin-top:12px"><button id="bCancel">Abbrechen</button><button id="bSave" class="on">Speichern</button></div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const vid = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
+let shots = [], cur = null, lastSeenId = null, rate = 0.25, lines = {}, drag = null, cfg = {};
+const RATES = [1, 0.5, 0.25, 0.125, 0.0625];
+
+const fmt = (v, d = 1) => (v === undefined || v === null || v === '') ? '–' : Number(v).toFixed(d).replace('.', ',');
+const fps = () => (cur && cur.video && cur.video.fps) || 240;
+
+// ---------------------------------------------------------------- status
+async function poll() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    cfg = st.config;
+    const p = $('#stProxy');
+    p.textContent = st.proxy_connected ? 'Connector ✓' : 'Connector nicht verbunden';
+    p.className = 'pill ' + (st.proxy_connected ? 'ok' : 'warn');
+    const ph = $('#stPhone');
+    if (st.phones.length) {
+      const s = st.phones[0].status || {};
+      const t = s.temp ? ` · ${fmt(s.temp, 0)} °C` : '';
+      ph.textContent = `Handy ✓ ${s.fps || '?'} fps${t}${s.pending ? ' · ' + s.pending + ' Upload(s) offen' : ''}`;
+      ph.className = 'pill ' + ((s.fps && !s.high_speed) || (s.temp && s.temp >= 43) ? 'warn' : 'ok');
+      ph.title = s.camera_info || '';
+    } else { ph.textContent = 'Handy nicht verbunden'; ph.className = 'pill bad'; }
+    $('#stClub').textContent = st.player && st.player.Club ? 'Schläger: ' + st.player.Club : '–';
+
+    const list = await (await fetch('/api/shots')).json();
+    const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.notes.impact_time]));
+    if (sig !== poll.sig) {
+      poll.sig = sig; shots = list; renderList(); renderStats();
+      const newest = list[0];
+      if (newest && newest.has_video && $('#autoplay').checked && newest.id !== lastSeenId && poll.init) {
+        select(newest.id, true);
+      }
+      if (newest && newest.has_video) lastSeenId = newest.id;
+      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video)) select(u.id); else if (u) cur = u; }
+      poll.init = true;
+    }
+  } catch (e) { $('#stProxy').textContent = 'Server offline'; $('#stProxy').className = 'pill bad'; }
+}
+setInterval(poll, 1500); poll();
+
+// ---------------------------------------------------------------- list
+function renderList() {
+  $('#list').innerHTML = shots.map(s => {
+    const pl = (s.shot && s.shot.payload) || {}, b = pl.BallData || {}, c = pl.ClubData || {};
+    const t = s.id.slice(9, 11) + ':' + s.id.slice(11, 13) + ':' + s.id.slice(13, 15);
+    const d = s.id.slice(6, 8) + '.' + s.id.slice(4, 6) + '.';
+    const club = (s.shot && s.shot.club) || '';
+    const main = s.shot && s.shot.test ? 'Testclip' : `${fmt(b.Speed)} mph · ${fmt(b.VLA)}° · ${fmt(b.TotalSpin, 0)} rpm`;
+    return `<div class="shot ${cur && cur.id === s.id ? 'sel' : ''}" data-id="${s.id}">
+      <div class="v">${main}</div><div class="t">${club}</div>
+      <div class="t">${d} ${t}${c.Speed ? ' · Club ' + fmt(c.Speed) + ' mph' : ''}</div>
+      <div>${s.has_video ? '🎬' : '<span class="nv">kein Video</span>'}</div></div>`;
+  }).join('') || '<div class="shot"><div class="t">Noch keine Schüsse. Schlag mit dem R10 oder „Testclip“ drücken.</div></div>';
+}
+$('#list').addEventListener('click', e => { const el = e.target.closest('.shot[data-id]'); if (el) select(el.dataset.id); });
+
+function renderStats() {
+  const g = {};
+  for (const s of shots) {
+    if (!s.shot || s.shot.test) continue;
+    const pl = s.shot.payload || {}, b = pl.BallData || {}, c = pl.ClubData || {};
+    const k = s.shot.club || '?';
+    (g[k] = g[k] || []).push({ bs: b.Speed, cs: c.Speed, vla: b.VLA, sp: b.TotalSpin });
+  }
+  const avg = (a, k) => { const v = a.map(x => x[k]).filter(x => typeof x === 'number' && x); return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null; };
+  const rows = Object.entries(g).map(([k, a]) =>
+    `<tr><td>${k} <span class="small">(${a.length})</span></td><td class="n">${fmt(avg(a, 'bs'))}</td><td class="n">${fmt(avg(a, 'cs'))}</td><td class="n">${fmt(avg(a, 'vla'))}</td><td class="n">${fmt(avg(a, 'sp'), 0)}</td></tr>`).join('');
+  $('#tStats').innerHTML = rows ? `<tr class="small"><td></td><td class="n">Ball</td><td class="n">Club</td><td class="n">VLA</td><td class="n">Spin</td></tr>` + rows : '<tr><td class="small">–</td></tr>';
+}
+
+// ---------------------------------------------------------------- select
+function select(id, autoplay) {
+  cur = shots.find(s => s.id === id); if (!cur) return;
+  renderList();
+  const pl = (cur.shot && cur.shot.payload) || {}, b = pl.BallData || {}, c = pl.ClubData || {};
+  const row = (l, v, u) => `<tr><td>${l}</td><td class="n">${v} <span class="small">${u}</span></td></tr>`;
+  $('#tBall').innerHTML = row('Ballgeschw.', fmt(b.Speed), 'mph') + row('Abflugwinkel (VLA)', fmt(b.VLA), '°') +
+    row('Richtung (HLA)', fmt(b.HLA), '°') + row('Spin gesamt', fmt(b.TotalSpin, 0), 'rpm') +
+    row('Spinachse', fmt(b.SpinAxis), '°') + row('Backspin', fmt(b.Backspin, 0), 'rpm') + row('Sidespin', fmt(b.SideSpin, 0), 'rpm');
+  $('#tClub').innerHTML = row('Schlägerkopf', fmt(c.Speed), 'mph') + row('Angle of Attack', fmt(c.AngleOfAttack), '°') +
+    row('Club Path', fmt(c.Path), '°') + row('Face to Target', fmt(c.FaceToTarget), '°') +
+    row('Face to Path', fmt(c.HorizontalFaceImpact), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '');
+  const v = cur.video;
+  $('#vInfo').textContent = v ? `${v.width}×${v.height} · ${fmt(v.fps, 0)} fps · ${fmt(v.duration, 2)} s · ${fmt(v.bytes / 1e6, 1)} MB · ${v.device || ''}` : 'Kein Video zu diesem Schuss.';
+  $('#note').value = cur.notes.text || '';
+  $('#empty').style.display = cur.has_video ? 'none' : '';
+  if (cur.has_video) {
+    vid.src = `/shots/${id}/clip.mp4?v=${v ? v.bytes : 0}`;
+    vid.playbackRate = rate;
+    vid.onloadedmetadata = () => {
+      fitCanvas(); renderTl();
+      const start = cur.notes.impact_time != null ? Math.max(0, cur.notes.impact_time - 1.0) : 0;
+      vid.currentTime = start;
+      vid.playbackRate = rate;
+      if (autoplay) vid.play();
+    };
+  } else { vid.removeAttribute('src'); vid.load(); }
+  draw();
+}
+
+// ---------------------------------------------------------------- player
+$('#rates').innerHTML = RATES.map(r => `<button data-r="${r}">${r === 1 ? '1×' : (r < 0.1 ? '1/16' : r === 0.125 ? '1/8' : r + '×')}</button>`).join(' ');
+function setRate(r) { rate = r; vid.playbackRate = r; document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', +b.dataset.r === r)); }
+$('#rates').addEventListener('click', e => { if (e.target.dataset.r) setRate(+e.target.dataset.r); });
+setRate(0.25);
+
+const toggle = () => vid.paused ? vid.play() : vid.pause();
+const step = n => { vid.pause(); vid.currentTime = Math.min(vid.duration || 0, Math.max(0, vid.currentTime + n / fps())); };
+$('#bPlay').onclick = toggle; $('#bPrev').onclick = () => step(-1); $('#bNext').onclick = () => step(1);
+vid.onplay = vid.onpause = () => $('#bPlay').textContent = vid.paused ? '▶' : '❚❚';
+vid.onended = () => { if ($('#loop').checked) { vid.currentTime = 0; vid.play(); } };
+vid.ontimeupdate = () => {
+  const t = vid.currentTime, d = vid.duration || 0;
+  $('#prog').style.width = (d ? t / d * 100 : 0) + '%';
+  $('#time').textContent = `${fmt(t, 3)} / ${fmt(d, 2)} s · Frame ${Math.round(t * fps())}`;
+};
+$('#tl').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); if (vid.duration) vid.currentTime = (e.clientX - r.left) / r.width * vid.duration; };
+function renderTl() {
+  document.querySelectorAll('#tl .mk').forEach(m => m.remove());
+  const d = vid.duration; if (!d || !cur) return;
+  const add = (t, col, label) => { if (t == null || t < 0 || t > d) return; const m = document.createElement('div'); m.className = 'mk'; m.style.left = (t / d * 100) + '%'; m.style.background = col; m.innerHTML = `<span style="color:${col}">${label}</span>`; $('#tl').appendChild(m); };
+  if (cur.video) add(cur.video.trigger_time, '#e0a63a', 'R10');
+  add(cur.notes.impact_time, '#4aa3ff', 'Impact');
+}
+$('#bTrig').onclick = () => { if (cur && cur.video && cur.video.trigger_time != null) { vid.pause(); vid.currentTime = Math.min(vid.duration, cur.video.trigger_time); } };
+$('#bGoImpact').onclick = () => { if (cur && cur.notes.impact_time != null) { vid.pause(); vid.currentTime = cur.notes.impact_time; } };
+async function saveNotes(obj) {
+  if (!cur) return;
+  cur.notes = await (await fetch(`/api/shots/${cur.id}/notes`, { method: 'POST', body: JSON.stringify(obj) })).json();
+  renderTl();
+}
+$('#bImpact').onclick = () => { if (cur && cur.has_video) saveNotes({ impact_time: Math.round(vid.currentTime * 10000) / 10000 }); };
+let noteTimer; $('#note').oninput = () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => saveNotes({ text: $('#note').value }), 600); };
+$('#bDel').onclick = async () => { if (cur && confirm('Diesen Schuss inkl. Video löschen?')) { await fetch('/api/shots/' + cur.id, { method: 'DELETE' }); cur = null; vid.removeAttribute('src'); vid.load(); poll.sig = null; poll(); } };
+$('#btnTest').onclick = () => fetch('/api/trigger', { method: 'POST' });
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if (e.key === ' ') { e.preventDefault(); toggle(); }
+  else if (e.key === 'ArrowLeft' || e.key === ',') step(e.shiftKey ? -10 : -1);
+  else if (e.key === 'ArrowRight' || e.key === '.') step(e.shiftKey ? 10 : 1);
+  else if (e.key === 'i' || e.key === 'I') $('#bImpact').click();
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const i = shots.findIndex(s => cur && s.id === cur.id) + (e.key === 'ArrowDown' ? 1 : -1);
+    if (shots[i]) { e.preventDefault(); select(shots[i].id); }
+  }
+});
+
+// ---------------------------------------------------------------- drawing (Linien, z.B. Schwungebene)
+function fitCanvas() {
+  const r = vid.getBoundingClientRect(), s = $('#stage').getBoundingClientRect();
+  cv.width = r.width; cv.height = r.height; cv.style.left = (r.left - s.left) + 'px'; cv.style.top = (r.top - s.top) + 'px';
+  draw();
+}
+window.addEventListener('resize', fitCanvas);
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const L = (cur && lines[cur.id]) || [];
+  ctx.lineWidth = 2; ctx.strokeStyle = '#ffeb3b';
+  for (const l of L.concat(drag ? [drag] : [])) {
+    ctx.beginPath(); ctx.moveTo(l[0] * cv.width, l[1] * cv.height); ctx.lineTo(l[2] * cv.width, l[3] * cv.height); ctx.stroke();
+  }
+}
+const rel = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+cv.onmousedown = e => { if (!cur) return; const p = rel(e); drag = [p[0], p[1], p[0], p[1]]; };
+cv.onmousemove = e => { if (drag) { const p = rel(e); drag[2] = p[0]; drag[3] = p[1]; draw(); } };
+cv.onmouseup = () => { if (drag && cur) { if (Math.hypot(drag[2] - drag[0], drag[3] - drag[1]) > 0.01) (lines[cur.id] = lines[cur.id] || []).push(drag); else toggle(); } drag = null; draw(); };
+$('#bClear').onclick = () => { if (cur) { lines[cur.id] = []; draw(); } };
+
+// ---------------------------------------------------------------- settings dialog
+$('#btnSettings').onclick = async () => {
+  $('#cPre').value = cfg.clip_pre_seconds; $('#cPost').value = cfg.clip_post_seconds; $('#cDelay').value = cfg.trigger_delay_seconds;
+  const c = await (await fetch('/api/calibration')).json();
+  $('#calib').textContent = c.samples ? `${c.samples} markierte Schüsse → R10-Verzögerung ≈ ${fmt(c.suggested_delay, 2)} s (Streuung ${fmt(c.min, 2)}–${fmt(c.max, 2)} s)` : 'Noch keine markierten Schüsse.';
+  $('#bApplyCal').disabled = !c.samples;
+  $('#bApplyCal').onclick = () => { $('#cDelay').value = c.suggested_delay; $('#cPre').value = 1.5; $('#cPost').value = 1.0; };
+  $('#dlg').showModal();
+};
+$('#bCancel').onclick = () => $('#dlg').close();
+$('#bSave').onclick = async () => {
+  cfg = await (await fetch('/api/config', { method: 'POST', body: JSON.stringify({ clip_pre_seconds: +$('#cPre').value, clip_post_seconds: +$('#cPost').value, trigger_delay_seconds: +$('#cDelay').value }) })).json();
+  $('#dlg').close();
+};
+</script>
+</body>
+</html>
