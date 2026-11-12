@@ -1,0 +1,47 @@
+{
+  "received_at": "2026-11-12T13:29:41.311",
+  "test": false,
+  "club": "W3",
+  "player": {
+    "Handed": "LH",
+    "Club": "W3",
+    "DistanceToTarget": 392.0,
+    "Surface": null
+  },
+  "payload": {
+    "DeviceID": "Garmin R10 BT",
+    "Units": "Yards",
+    "ShotNumber": 2,
+    "APIversion": "1",
+    "BallData": {
+      "Speed": 83.58,
+      "SpinAxis": 1.34,
+      "TotalSpin": 6237.43,
+      "HLA": 5.29,
+      "VLA": 22.86,
+      "Backspin": 6236,
+      "SideSpin": 146,
+      "CarryDistance": 0
+    },
+    "ClubData": {
+      "Speed": 76.64,
+      "AngleOfAttack": -0.53,
+      "FaceToTarget": 5.84,
+      "Lie": 0,
+      "Loft": 0,
+      "Path": 3.89,
+      "SpeedAtImpact": 76.64,
+      "VerticalFaceImpact": 0,
+      "HorizontalFaceImpact": 0,
+      "ClosureRate": 0
+    },
+    "ShotDataOptions": {
+      "ContainsBallData": true,
+      "ContainsClubData": true,
+      "LaunchMonitorIsReady": true,
+      "LaunchMonitorBallDetected": true,
+      "IsHeartBeat": false
+    }
+  },
+  "phones_triggered": 1
+}

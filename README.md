@@ -251,6 +251,10 @@ android/             Kotlin-App, nur Android-Framework (+ androidx.core für Fil
 .github/workflows/android.yml   APK-Build, Release cam-latest
 ```
 
+**Beispieldaten:** In [`samples/`](samples/) liegt ein echter Schlag (240-fps-Original, R10-Daten, von Hand
+gesetzte Referenz für Treffmoment und Schaftlinien) und ein fertiges Export-Video. Test der automatischen Analyse:
+`python pc\test_sample.py`. Damit kann man ohne Handy, R10 und GSPro weiterentwickeln.
+
 **Protokoll:** Handy ↔ PC über TCP 9300, eine JSON-Nachricht pro Zeile
 (`hello`/`status` vom Handy, `trigger`/`preview` vom PC). Upload per `POST /api/upload?shot=…&fps=…&trigger=…`.
 
