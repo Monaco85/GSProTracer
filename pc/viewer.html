@@ -72,7 +72,12 @@ dialog::backdrop{background:#0008}
       <button id="bTrig" title="Zum Zeitpunkt springen, an dem die R10-Daten ankamen">→ R10</button>
       <button id="bImpact" title="Aktuelles Bild als Treffmoment markieren (für Kalibrierung)">Impact hier (I)</button>
       <button id="bGoImpact">→ Impact</button>
-      <button id="bClear" title="Gezeichnete Linien entfernen">Linien ✕</button>
+      <select id="lineType" title="Linie ins Video ziehen: vom Schlägerkopf den Schaft entlang">
+        <option value="addr">Linie: Ansprechen</option>
+        <option value="down">Linie: Abschwung (ab jetzt)</option>
+        <option value="help">Linie: Hilfslinie</option>
+      </select>
+      <button id="bClear" title="Gespeicherte Linien entfernen">Linien ✕</button>
       <span id="time"></span>
     </div>
   </div>
@@ -198,7 +203,7 @@ function select(id, autoplay) {
     row('Spinachse', fmt(b.SpinAxis), '°') + row('Backspin', fmt(b.Backspin, 0), 'rpm') + row('Sidespin', fmt(b.SideSpin, 0), 'rpm');
   $('#tClub').innerHTML = row('Schlägerkopf', fmt(kmh(c.Speed)), 'km/h') + row('Angle of Attack', fmt(c.AngleOfAttack), '°') +
     row('Club Path', fmt(c.Path), '°') + row('Face to Target', fmt(c.FaceToTarget), '°') +
-    row('Face to Path', fmt(c.HorizontalFaceImpact), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '');
+    row('Face to Path', fmt(c.HorizontalFaceImpact || ((typeof c.FaceToTarget === 'number' && typeof c.Path === 'number') ? c.FaceToTarget - c.Path : null)), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '');
   const v = cur.video;
   $('#vInfo').textContent = v ? `${v.width}×${v.height} · ${fmt(v.fps, 0)} fps · ${fmt(v.duration, 2)} s · ${fmt(v.bytes / 1e6, 1)} MB · ${v.device || ''}` : 'Kein Video zu diesem Schuss.';
   renderExport();
@@ -289,19 +294,57 @@ function fitCanvas() {
   draw();
 }
 window.addEventListener('resize', fitCanvas);
+// Linien werden in notes.json gespeichert und beim Export ins Video gezeichnet.
+// Ziehen: vom Schlägerkopf den Schaft entlang nach oben. Die Linie wird bis zum Bildrand verlängert.
+const LINE_TYPES = {
+  addr: { label: 'Ansprechen', color: '#4aa3ff', fromZero: true },
+  down: { label: 'Abschwung', color: '#ff9800', fromZero: false },
+  help: { label: '', color: '#ffeb3b', fromZero: true },
+};
+function savedLines() { return (cur && cur.notes && cur.notes.lines) || []; }
 function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
-  const L = (cur && lines[cur.id]) || [];
-  ctx.lineWidth = 2; ctx.strokeStyle = '#ffeb3b';
-  for (const l of L.concat(drag ? [drag] : [])) {
-    ctx.beginPath(); ctx.moveTo(l[0] * cv.width, l[1] * cv.height); ctx.lineTo(l[2] * cv.width, l[3] * cv.height); ctx.stroke();
+  const W = cv.width, H = cv.height, t = vid.currentTime || 0;
+  const all = savedLines().filter(l => t + 1e-6 >= (l.from || 0));
+  if (drag) all.push(drag);
+  for (const l of all) {
+    let x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
+    if (l.extend !== false && y2 !== y1) {           // nach oben bis zum Bildrand verlängern
+      const [bx, by, tx, ty] = y1 > y2 ? [x1, y1, x2, y2] : [x2, y2, x1, y1];
+      x2 = bx + (tx - bx) * (0 - by) / (ty - by); y2 = 0; x1 = bx; y1 = by + 0.02 * H;
+    }
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = l.color || '#ffeb3b';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    if (l.label) {
+      const ang = Math.round(Math.atan2(Math.abs((l.y2 - l.y1) * vid.videoHeight), Math.abs((l.x2 - l.x1) * vid.videoWidth)) * 180 / Math.PI);
+      const tx = Math.min(W - 150, (l.y2 < l.y1 ? l.x2 : l.x1) * W + 8), ty = Math.max(16, (Math.min(l.y1, l.y2)) * H - 10);
+      ctx.font = 'bold 14px system-ui'; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(tx - 3, ty - 14, ctx.measureText(`${l.label} ${ang}°`).width + 6, 19);
+      ctx.fillStyle = l.color; ctx.fillText(`${l.label} ${ang}°`, tx, ty);
+    }
   }
 }
+vid.addEventListener('timeupdate', draw); vid.addEventListener('seeked', draw);
 const rel = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
-cv.onmousedown = e => { if (!cur) return; const p = rel(e); drag = [p[0], p[1], p[0], p[1]]; };
-cv.onmousemove = e => { if (drag) { const p = rel(e); drag[2] = p[0]; drag[3] = p[1]; draw(); } };
-cv.onmouseup = () => { if (drag && cur) { if (Math.hypot(drag[2] - drag[0], drag[3] - drag[1]) > 0.01) (lines[cur.id] = lines[cur.id] || []).push(drag); else toggle(); } drag = null; draw(); };
-$('#bClear').onclick = () => { if (cur) { lines[cur.id] = []; draw(); } };
+cv.onmousedown = e => {
+  if (!cur) return; const p = rel(e); const ty = LINE_TYPES[$('#lineType').value];
+  drag = { x1: p[0], y1: p[1], x2: p[0], y2: p[1], color: ty.color, label: ty.label, extend: true,
+           from: ty.fromZero ? 0 : Math.round(vid.currentTime * 10000) / 10000 };
+};
+cv.onmousemove = e => { if (drag) { const p = rel(e); drag.x2 = p[0]; drag.y2 = p[1]; draw(); } };
+cv.onmouseup = async () => {
+  const d = drag; drag = null;
+  if (d && cur) {
+    if (Math.hypot(d.x2 - d.x1, d.y2 - d.y1) > 0.01) {
+      // gleicher Typ (Ansprechen/Abschwung) ersetzt die alte Linie
+      const keep = savedLines().filter(l => !(d.label && l.label === d.label));
+      await saveNotes({ lines: keep.concat([d]) });
+    } else toggle();
+  }
+  draw();
+};
+$('#bClear').onclick = async () => { if (cur && confirm('Alle Linien dieses Schlags löschen?')) { await saveNotes({ lines: [] }); draw(); } };
 
 // ---------------------------------------------------------------- settings dialog
 $('#btnSettings').onclick = async () => {

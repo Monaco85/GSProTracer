@@ -63,6 +63,10 @@ def shot_rows(payload):
     kmh = lambda v: f"{_num(float(v) * MPH_TO_KMH)} km/h" if isinstance(v, (int, float)) and v else "–"
     smash = _num(bs / cs, 2) if isinstance(bs, (int, float)) and isinstance(cs, (int, float)) and cs else None
     spin = b.get("TotalSpin")
+    # Der R10-Connector liefert Face-to-Path nicht (immer 0) -> aus Face to Target - Path berechnen
+    ftp = c.get("HorizontalFaceImpact")
+    if (not ftp) and isinstance(c.get("FaceToTarget"), (int, float)) and isinstance(c.get("Path"), (int, float)):
+        ftp = c["FaceToTarget"] - c["Path"]
     left = [
         ("Ballgeschw.", kmh(bs)),
         ("Schlägerkopf", kmh(cs)),
@@ -76,7 +80,7 @@ def shot_rows(payload):
         ("AoA", _deg(c.get("AngleOfAttack"))),
         ("Club Path", _deg(c.get("Path"))),
         ("Face/Target", _deg(c.get("FaceToTarget"))),
-        ("Face/Path", _deg(c.get("HorizontalFaceImpact"))),
+        ("Face/Path", _deg(ftp)),
     ]
     return left, right
 
@@ -148,6 +152,59 @@ class Exporter:
             finally:
                 self.busy = None
 
+    def _line_overlays(self, lines, w, h, shot_dir, fs, files, font_bold):
+        """
+        Erzeugt pro Linie ein transparentes PNG (per FFmpeg geq) und die Beschriftung.
+        Linie: {"x1","y1","x2","y2"} normiert 0..1 (Punkt 1 = Schlaegerkopf, Punkt 2 = Richtung Griff),
+        "color" "#rrggbb", "label", "from" (Sekunde im Clip, ab der sie sichtbar ist), "extend" (bis Bildrand).
+        Rueckgabe: ({png: from}, [drawtext-Filter fuer Beschriftungen])
+        """
+        import math
+        inputs, filters = {}, []
+        fr = _esc(FONT_REGULAR)
+        for i, ln in enumerate(lines):
+            try:
+                X1, Y1 = float(ln["x1"]) * w, float(ln["y1"]) * h
+                X2, Y2 = float(ln["x2"]) * w, float(ln["y2"]) * h
+            except (KeyError, TypeError, ValueError):
+                continue
+            if abs(X2 - X1) + abs(Y2 - Y1) < 2:
+                continue
+            col = str(ln.get("color", "#4aa3ff")).lstrip("#")
+            r, g, b = int(col[0:2], 16), int(col[2:4], 16), int(col[4:6], 16)
+            A, B, C = Y2 - Y1, X1 - X2, X2 * Y1 - X1 * Y2
+            L = math.hypot(A, B)
+            ybot = max(Y1, Y2) + 0.02 * h
+            ytop = 0 if ln.get("extend", True) else min(Y1, Y2)
+            d = f"abs({A:.3f}*X+{B:.3f}*Y+{C:.3f})/{L:.3f}"
+            on = f"between(Y,{ytop:.1f},{ybot:.1f})"
+            png = f"_ov_line{i}.png"
+            geq = (f"r='if(lt({d},2.2),{r},0)':g='if(lt({d},2.2),{g},0)':b='if(lt({d},2.2),{b},0)'"
+                   f":a='255*clip(4-{d},0,1)*{on}'")
+            res = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                                  "-i", f"color=c=black@0:s={w}x{h},format=rgba", "-vf", f"geq={geq}",
+                                  "-frames:v", "1", png], cwd=shot_dir, capture_output=True, text=True,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if res.returncode != 0:
+                log.warning("Linie %d: %s", i, res.stderr.strip()[-300:])
+                continue
+            start = float(ln.get("from", 0) or 0)
+            inputs[png] = start
+            # Beschriftung mit Winkel zur Horizontalen
+            ang = math.degrees(math.atan2(abs(Y2 - Y1), abs(X2 - X1)))
+            label = f"{ln.get('label', '')} {ang:.0f}°".strip().replace(".", ",")
+            tf = f"_ov_lbl{i}.txt"
+            files[tf] = label
+            with open(os.path.join(shot_dir, tf), "w", encoding="utf-8", newline="\n") as f:
+                f.write(label)
+            top_x, top_y = (X2, Y2) if Y2 < Y1 else (X1, Y1)
+            lx = int(min(max(top_x + fs * 0.6, 8), w - fs * 9))
+            ly = int(min(max(top_y - fs * 1.8 - i * fs * 1.6, 8), h - fs * 2))
+            filters.append(
+                f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
+                f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={lx}:y={ly}:enable='gte(t,{start:.4f})'")
+        return inputs, filters
+
     def export(self, sid):
         shot_dir = self.store.path(sid)
         clip = os.path.join(shot_dir, "clip.mp4")
@@ -196,7 +253,11 @@ class Exporter:
             return (f"drawtext=fontfile='{font}':textfile={file}:fontcolor={color}:fontsize={size}"
                     f":x={x}:y={y}:line_spacing={lh}")
 
-        vf = ",".join([
+        # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
+        notes = self.store.read_json(sid, "notes.json") or {}
+        line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb)
+
+        vf = ",".join(line_filters + [
             f"drawbox=x=0:y=ih-{panel_h}:w=iw:h={panel_h}:color=black@0.62:t=fill",
             dt("_ov_head.txt", fb, hs, x1, top, "0xFFEB3B"),
             dt("_ov_l1.txt", fr, fs, x1, body, "0xB0BEC5"),
@@ -208,12 +269,24 @@ class Exporter:
             f"setpts={slow:g}*PTS",
         ])
         tmp = os.path.join(shot_dir, "_export.tmp.mp4")
-        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", "clip.mp4",
-               "-vf", vf, "-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-               "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
+        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", "clip.mp4"]
+        for png in line_inputs:
+            cmd += ["-loop", "1", "-i", png]
+        if line_inputs:
+            # [0:v] -> Linien-Overlays -> Panel/Texte (Overlay braucht filter_complex)
+            chain, cur = [], "[0:v]"
+            for i, (png, start) in enumerate(line_inputs.items(), start=1):
+                chain.append(f"{cur}[{i}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[l{i}]")
+                cur = f"[l{i}]"
+            chain.append(f"{cur}{vf}[out]")
+            cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
+        else:
+            cmd += ["-vf", vf]
+        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         res = subprocess.run(cmd, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)
-        for name in files:
+        for name in list(files) + list(line_inputs):
             try:
                 os.remove(os.path.join(shot_dir, name))
             except OSError:

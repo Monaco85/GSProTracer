@@ -653,9 +653,12 @@ def make_handler(app: TracerApp):
                     if not app.store.get(sid):
                         return self.send_text("unknown shot", 404)
                     notes = app.store.read_json(sid, "notes.json") or {}
-                    notes.update(json.loads(self.read_body() or b"{}"))
+                    upd = json.loads(self.read_body() or b"{}")
+                    notes.update(upd)
                     notes = {k: v for k, v in notes.items() if v is not None}
                     app.store.write_json(sid, "notes.json", notes)
+                    if "lines" in upd:          # Linien geaendert -> Video mit Daten neu erstellen
+                        app.exporter.enqueue(sid)
                     return self.send_json(notes)
                 self.send_text("not found", 404)
             except (BrokenPipeError, ConnectionResetError):
