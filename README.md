@@ -2,8 +2,7 @@
 
 Schwungvideos mit **240 fps** vom Handy (Poco X3) – automatisch zu jedem Schlag, den der **Garmin R10** an
 **GSPro** meldet. Am PC: Zeitlupen-Analyse im Browser, fertige Videos mit eingeblendeten Schlagdaten in **km/h**
-und automatisch eingezeichneten **Schaftlinien** (Ansprechen / Abschwung) sowie der **Schwungbahn**
-(Ausholen / Abschwung).
+und automatisch eingezeichneten **Schaftlinien** (Ansprechen / Abschwung).
 
 ```
 Garmin R10 ──BT──► MLM2PRO-GSPro-Connector ──► Tracer-Proxy :9211 ──► GSPro OpenAPI :921
@@ -53,8 +52,7 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
   Smash, Face-to-Path, Notizen, Durchschnitt pro Schläger, CSV-Export (Excel)
 - **Kamera ausrichten** <http://localhost:8090/live>: Live-Bild mit Raster und Markierungen
 - **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, aufgehellt, ca. 7 MB
-- **Automatische Analyse** (OpenCV): Treffmoment, Ansprechen, **Schaftlinien** beim Ansprechen und im Abschwung,
-  **Schwungbahn** des Schlägerkopfs beim Ausholen und im Abschwung
+- **Automatische Analyse** (OpenCV): Treffmoment, Ansprechen, **Schaftlinien** beim Ansprechen und im Abschwung
   inkl. Winkel; Linien lassen sich auch von Hand zeichnen
 
 ---
@@ -162,12 +160,10 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
 
 - **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (quer/hochkant)
 - **Aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
-- **Datenpanel** (quer: kompakt oben links, damit Ball und Schwungbahn frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
+- **Datenpanel** (quer: kompakt oben links, damit Ball und Schlägerkopf frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
   verlängert bis zum Bildrand (Schwungebene)
-- **Schwungbahn:** hellblau = Ausholen (nur der Schlägerkopf als Vektor mit Pfeilspitze), orange-rot = Abschwung
-  (Kopfbahn plus dünne Schaftlinien als Fächer). Die Bahn wächst beim Abspielen mit. Gezeigt wird der Teil, in dem der Schläger im Bild ist.
 - **Ganzer Clip** in guter Qualität (CRF 20) → ca. **7 MB** pro Schlag. Kleiner: `export_trim: true` und/oder
   `export_crf: 28` (ca. 0,5 MB)
 
@@ -176,9 +172,6 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
 2. *Ansprechen:* letztes ruhiges Bild, bevor sich der Schläger um den Ball bewegt.
 3. *Schaft:* Bild mit Schläger am Ball minus Bild ohne Schläger → Kanten → Hough-Linien → die längste Linie,
    die zum Schlägerkopf zeigt.
-4. *Schwungbahn:* Schlägerkopf Bild für Bild verfolgen (Schaft per Hough-Linie, Kopf = kompakter Fleck am
-   Schaftende), beim Ausholen vorwärts ab dem Ansprechen, im Abschwung rückwärts ab dem Treffmoment, bis er das
-   Bild verlässt.
 
 Handgezeichnete Linien haben Vorrang. Ohne Ball im Bild oder vor sehr unruhigem Hintergrund kann die Erkennung
 danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
@@ -204,8 +197,7 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `export_preset` | medium | x264-Preset (`slow` = etwas kleiner, dauert länger) |
 | `export_brightness` | 0,6 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
-| `export_paths` | true | Schwungbahn (Ausholen/Abschwung) einzeichnen |
-| `clip_orientation` | quer | Handy liegt quer, Clip kommt aber hochkant an → beim Empfang verlustfrei quer stellen. Steht das Bild dann auf dem Kopf: `quer_180`. Leer = so lassen wie aufgenommen |
+| `clip_orientation` | quer_180 | Videolage, verlustfrei beim Empfang: `quer_180` = Sensorbild auf den Kopf gestellt, `quer` = Sensorbild, leer = wie aufgenommen. Auch auf der Analyse-Seite unter Einstellungen → Videolage; vorhandene Clips werden mitgedreht, Linien und Videos neu erstellt |
 | `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
 | `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
 | `export_trim` | false | true = Export nur vom Schwung (Ansprechen − 0,25 s bis Treffen + 0,6 s) |
@@ -245,6 +237,7 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 | „Connector nicht verbunden“ | Port in der Connector-`settings.json` auf 9211; Reihenfolge GSPro → Tracer → Connector |
 | Connector: „GSPro Send Error“, im Log „GSPro antwortet nicht“ bzw. „GSPro->Connector 0 Nachrichten“ | GSPro API Connect hängt noch an einer alten Verbindung: in GSPro API Connect schließen und neu starten, dann im Connector „Connect“. Reihenfolge: GSPro + API Connect → Tracer → Connector |
 | App: „PC nicht erreichbar“ | richtige PC-IP? gleiches WLAN? Firewall für Python (private Netzwerke) erlaubt? |
+| Video steht auf dem Kopf / liegt seitlich | Analyse-Seite → Einstellungen → Videolage umstellen |
 | Im Log „Clip ist HOCHKANT“ | In der App „Format: quer“ wählen bzw. App updaten; Querformat ist Standard |
 | Kein Video zum Schuss | App im Vordergrund? Handy verbunden (Analyse-Seite oben)? |
 | Treffmoment nicht im Clip | Kalibrierung durchführen (Einstellungen) |
