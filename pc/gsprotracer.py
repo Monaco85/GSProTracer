@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
     "export_brightness": 0.6,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
     "export_paths": True,              # Schwungbahn (Ausholen/Abschwung) ins Export-Video zeichnen
+    "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
+    "export_threads": 2,               # CPU-Kerne fuer den Export (0 = alle)
 }
 
 

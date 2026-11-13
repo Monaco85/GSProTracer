@@ -14,6 +14,7 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime
 
 log = logging.getLogger("tracer.export")
@@ -21,6 +22,20 @@ log = logging.getLogger("tracer.export")
 MPH_TO_KMH = 1.609344
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
+
+
+# Export laeuft mit niedriger Prioritaet: GSPro und der Connector-Proxy duerfen nie ausgebremst werden
+_LOW_PRIO = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+
+
+def _lower_thread_priority():
+    """Aktuellen Thread (Analyse/Export) unter Windows auf niedrige Prioritaet setzen."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.SetThreadPriority(k32.GetCurrentThread(), -2)   # THREAD_PRIORITY_LOWEST
+    except Exception:
+        pass
 
 
 def find_ffmpeg(configured=""):
@@ -138,8 +153,18 @@ class Exporter:
             self.q.put(shot_id)
 
     def _worker(self):
+        _lower_thread_priority()
+        try:
+            import cv2
+            cv2.setNumThreads(2)       # Analyse soll nicht alle Kerne belegen
+        except Exception:
+            pass
         while True:
             sid = self.q.get()
+            # erst loslegen, wenn GSPro den Schlag fertig verarbeitet hat (Ballflug, Antwort an den Connector)
+            wait = float(self.cfg.data.get("export_delay_seconds", 8) or 0)
+            if wait > 0:
+                time.sleep(wait)
             self.busy = sid
             try:
                 self.export(sid)
@@ -210,7 +235,7 @@ class Exporter:
             res = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
                                   "-i", f"color=c=black@0:s={w}x{h},format=rgba", "-vf", f"geq={geq}",
                                   "-frames:v", "1", png], cwd=shot_dir, capture_output=True, text=True,
-                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                 creationflags=_LOW_PRIO)
             if res.returncode != 0:
                 log.warning("Linie %d: %s", i, res.stderr.strip()[-300:])
                 continue
@@ -444,9 +469,11 @@ class Exporter:
         cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
         crf = str(int(self.cfg.data.get("export_crf", 18)))
         preset = str(self.cfg.data.get("export_preset", "medium"))
-        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", preset, "-crf", crf,
+        # nicht alle Kerne belegen (GSPro braucht Rechenleistung)
+        thr = str(int(self.cfg.data.get("export_threads", 2) or 0))
+        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", preset, "-crf", crf, "-threads", thr,
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        flags = _LOW_PRIO
         res = subprocess.run(cmd, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)
         for name in list(files) + list(line_inputs):
             try:

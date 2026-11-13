@@ -17,5 +17,7 @@
   "export_preset": "medium",
   "export_brightness": 0.6,
   "export_paths": true,
-  "export_denoise": 3
+  "export_denoise": 3,
+  "export_delay_seconds": 8,
+  "export_threads": 2
 }

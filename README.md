@@ -204,6 +204,8 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `export_brightness` | 0,6 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
 | `export_paths` | true | Schwungbahn (Ausholen/Abschwung) einzeichnen |
+| `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
+| `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
 | `export_trim` | false | true = Export nur vom Schwung (Ansprechen − 0,25 s bis Treffen + 0,6 s) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
 | `ffmpeg_path` | "" | leer = automatisch suchen |
