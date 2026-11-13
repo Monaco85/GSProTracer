@@ -242,6 +242,7 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 | Seite meldet „Seite bitte über http://localhost:8090 öffnen“ | Seite wurde als Datei geöffnet – Adresse im Browser verwenden |
 | „Tracer-Programm nicht erreichbar“ | `pc\start_tracer.bat` starten |
 | „Connector nicht verbunden“ | Port in der Connector-`settings.json` auf 9211; Reihenfolge GSPro → Tracer → Connector |
+| Connector: „GSPro Send Error“, im Log „GSPro antwortet nicht“ bzw. „GSPro->Connector 0 Nachrichten“ | GSPro API Connect hängt noch an einer alten Verbindung: in GSPro API Connect schließen und neu starten, dann im Connector „Connect“. Reihenfolge: GSPro + API Connect → Tracer → Connector |
 | App: „PC nicht erreichbar“ | richtige PC-IP? gleiches WLAN? Firewall für Python (private Netzwerke) erlaubt? |
 | Kein Video zum Schuss | App im Vordergrund? Handy verbunden (Analyse-Seite oben)? |
 | Treffmoment nicht im Clip | Kalibrierung durchführen (Einstellungen) |

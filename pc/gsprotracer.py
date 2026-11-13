@@ -317,6 +317,20 @@ class GSProProxy:
             return "Schuss"
         return "Status" if opts else "?"
 
+    @staticmethod
+    def _watch_reply(st):
+        """Warnen, wenn GSPro auf einen Schuss nicht antwortet (haeufig: API Connect haengt)."""
+        n0 = st["n_gspro"]
+
+        def check():
+            if st["closed_by"] is None and st["n_gspro"] == n0:
+                log.warning("GSPro antwortet nicht auf den Schuss! Wahrscheinlich haengt GSPro API Connect noch an "
+                            "einer alten Verbindung. In GSPro API Connect schliessen und neu starten, dann im "
+                            "Connector auf 'Connect' druecken.")
+        t = threading.Timer(3.0, check)
+        t.daemon = True
+        t.start()
+
     def _pump(self, src, dst, from_connector, st):
         stream = JsonStream()
         side = "Connector" if from_connector else "GSPro"
@@ -342,6 +356,7 @@ class GSProProxy:
                             opts = obj.get("ShotDataOptions", {})
                             if opts.get("ContainsBallData") and not opts.get("IsHeartBeat"):
                                 self.on_shot(obj)
+                                self._watch_reply(st)
                         else:
                             st["n_gspro"] += 1
                             st["last_gspro"] = desc
@@ -380,6 +395,7 @@ class TracerApp:
         self.exporter = Exporter(self.store, self.cfg)
         self.player = {}
         self.last_shot_id = None
+        self._last_shot_key, self._last_shot_at = None, 0.0
         # Live-Bild vom Handy (nur solange die Live-Seite offen ist)
         self.preview_lock = threading.Lock()
         self.preview_jpeg = None
@@ -426,6 +442,15 @@ class TracerApp:
         return n
 
     def handle_shot(self, payload, test=False):
+        # Connector wiederholt einen Schuss, wenn GSPro nicht antwortet -> nicht doppelt aufnehmen
+        if not test:
+            key = json.dumps({k: (payload or {}).get(k) for k in ("ShotNumber", "BallData", "ClubData")},
+                             sort_keys=True)
+            now = time.time()
+            if key == self._last_shot_key and now - self._last_shot_at < 15:
+                log.info("Gleicher Schuss nochmal gesendet (Wiederholung des Connectors) - wird ignoriert")
+                return self.last_shot_id
+            self._last_shot_key, self._last_shot_at = key, now
         shot_id = self.store.new_id()
         # Trigger sofort raus, erst danach speichern (Timing!)
         n = self.trigger_phones(shot_id)
