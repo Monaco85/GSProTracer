@@ -300,38 +300,74 @@ class GSProProxy:
                 s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.connected = True
             log.info("Connector <-> GSPro verbunden (ueber Proxy)")
-            threading.Thread(target=self._pump, args=(client, upstream, True), daemon=True).start()
-            threading.Thread(target=self._pump, args=(upstream, client, False), daemon=True).start()
+            # gemeinsamer Zustand beider Richtungen -> beim Ende protokollieren, wer getrennt hat
+            st = {"t0": time.time(), "closed_by": None, "n_conn": 0, "n_gspro": 0,
+                  "last_conn": "", "last_gspro": "", "lock": threading.Lock()}
+            threading.Thread(target=self._pump, args=(client, upstream, True, st), daemon=True).start()
+            threading.Thread(target=self._pump, args=(upstream, client, False, st), daemon=True).start()
 
-    def _pump(self, src, dst, from_connector):
+    @staticmethod
+    def _describe(obj):
+        if "Code" in obj:
+            return f"Code {obj.get('Code')} {str(obj.get('Message') or '')[:60]}".strip()
+        opts = obj.get("ShotDataOptions") or {}
+        if opts.get("IsHeartBeat"):
+            return "Heartbeat"
+        if opts.get("ContainsBallData"):
+            return "Schuss"
+        return "Status" if opts else "?"
+
+    def _pump(self, src, dst, from_connector, st):
         stream = JsonStream()
+        side = "Connector" if from_connector else "GSPro"
+        reason = f"{side} hat die Verbindung geschlossen"
         try:
             while True:
                 data = src.recv(65536)
                 if not data:
                     break
-                dst.sendall(data)  # zuerst weiterleiten -> keine zusaetzliche Latenz fuer GSPro
+                try:
+                    dst.sendall(data)  # zuerst weiterleiten -> keine zusaetzliche Latenz fuer GSPro
+                except OSError as e:
+                    reason = f"Weiterleiten an {'GSPro' if from_connector else 'Connector'} fehlgeschlagen: {e}"
+                    break
                 try:
                     for obj in stream.feed(data):
+                        desc = self._describe(obj)
                         if from_connector:
+                            st["n_conn"] += 1
+                            st["last_conn"] = desc
+                            if desc != "Heartbeat":
+                                log.info("Connector -> GSPro: %s", desc)
                             opts = obj.get("ShotDataOptions", {})
                             if opts.get("ContainsBallData") and not opts.get("IsHeartBeat"):
                                 self.on_shot(obj)
                         else:
+                            st["n_gspro"] += 1
+                            st["last_gspro"] = desc
+                            if obj.get("Code") != 200:
+                                log.info("GSPro -> Connector: %s", desc)
                             self.on_gspro_msg(obj)
                 except Exception:  # Analysefehler duerfen den Proxy nie stoeren
                     log.exception("Fehler beim Auswerten der Nachricht")
-        except OSError:
-            pass
+        except OSError as e:
+            reason = f"Verbindung zu {side} abgebrochen: {e}"
         finally:
+            with st["lock"]:
+                first = st["closed_by"] is None
+                if first:
+                    st["closed_by"] = reason
             self.connected = False
             for s in (src, dst):
                 try:
                     s.close()
                 except OSError:
                     pass
-            if from_connector:
-                log.info("Connector-Verbindung beendet")
+            if first:
+                log.warning("Connector-Verbindung beendet nach %.0f s: %s | Connector->GSPro %d Nachrichten "
+                            "(zuletzt: %s), GSPro->Connector %d (zuletzt: %s)",
+                            time.time() - st["t0"], reason, st["n_conn"], st["last_conn"] or "-",
+                            st["n_gspro"], st["last_gspro"] or "-")
 
 
 # --------------------------------------------------------------------------- app
