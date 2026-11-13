@@ -56,7 +56,8 @@ DEFAULT_CONFIG = {
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
-    "export_brightness": 0.6,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
+    "export_brightness": 1.0,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
+    "export_monochrome": True,         # Schwarzweiss: Schwung klarer, farbige Linien heben sich ab
     "clip_orientation": "quer_180",    # Clips verlustfrei drehen: quer = Sensorbild, quer_180 = auf dem Kopf
                                        # (Handy andersherum), "" = so lassen wie aufgenommen
     "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
@@ -84,6 +85,11 @@ class Config:
             self.data["export_trim"] = True
             self.data["only_complete_shots"] = True
             self.data["settings_version"] = 3
+        # einmalig: Schwarzweiss und heller
+        if self.data.get("settings_version", 0) < 4:
+            self.data["export_monochrome"] = True
+            self.data["export_brightness"] = max(1.0, float(self.data.get("export_brightness") or 0))
+            self.data["settings_version"] = 4
         self.save()
 
     @staticmethod

@@ -341,14 +341,15 @@ class Exporter:
         """Aufhellen per Tonwertkurve: Schatten/Mitten heller, Schwarz bleibt schwarz, Lichter bleiben."""
         s = float(self.cfg.data.get("export_brightness", 0.6) or 0)
         if s <= 0:
-            return None
+            return "hue=s=0" if self.cfg.data.get("export_monochrome", False) else None
         s = min(s, 1.5)
         p1 = min(0.9, 0.25 + 0.33 * s)
         p2 = min(0.97, 0.6 + 0.33 * s)
         dn = float(self.cfg.data.get("export_denoise", 3) or 0)
         # leichtes Entrauschen vorher: aufgehelltes Sensorrauschen kostet sonst viel Dateigroesse
         pre = f"hqdn3d={dn:g}:{dn * 0.75:g}:{dn * 1.5:g}:{dn * 1.1:g}," if dn > 0 else ""
-        return f"{pre}curves=all='0/0 0.25/{p1:.3f} 0.6/{p2:.3f} 1/1'"
+        mono = "hue=s=0," if self.cfg.data.get("export_monochrome", False) else ""
+        return f"{pre}{mono}curves=all='0/0 0.25/{p1:.3f} 0.6/{p2:.3f} 1/1'"
 
     def export(self, sid):
         shot_dir = self.store.path(sid)

@@ -159,7 +159,7 @@ Der Treffmoment wird automatisch erkannt (oder per Taste `I` markiert). Nach ein
 Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<Schläger>_<Ballspeed>kmh.mp4`:
 
 - **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (quer/hochkant)
-- **Aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
+- **Schwarzweiß und aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
 - **Datenpanel** (quer: kompakt oben links, damit Ball und Schlägerkopf frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
@@ -196,7 +196,8 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `export_playback_fps` | 30 | 30 = Zeitlupe 1/8, 60 = 1/4, 240 = Echtzeit |
 | `export_crf` | 20 | Qualität: 20 = sehr gut, 23 = gut, 28 = klein (niedriger = besser/größer) |
 | `export_preset` | medium | x264-Preset (`slow` = etwas kleiner, dauert länger) |
-| `export_brightness` | 0,6 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
+| `export_brightness` | 1,0 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
+| `export_monochrome` | true | Schwarzweiß (klarer, Linien heben sich ab, Export ca. 10 % schneller und kleiner) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
 | `clip_orientation` | quer_180 | Videolage, verlustfrei beim Empfang: `quer_180` = Sensorbild auf den Kopf gestellt, `quer` = Sensorbild, leer = wie aufgenommen. Auch auf der Analyse-Seite unter Einstellungen → Videolage; vorhandene Clips werden mitgedreht, Linien und Videos neu erstellt |
 | `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |

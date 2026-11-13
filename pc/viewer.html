@@ -140,7 +140,7 @@ async function poll() {
     cfg = st.config;
     // gleiche Aufhellung wie im Export-Video (export_brightness)
     const br = +(cfg.export_brightness || 0);
-    vid.style.filter = br > 0 ? `brightness(${(1 + 0.55 * br).toFixed(2)}) contrast(1.05)` : '';
+    vid.style.filter = (cfg.export_monochrome ? 'grayscale(1) ' : '') + (br > 0 ? `brightness(${(1 + 0.55 * br).toFixed(2)}) contrast(1.05)` : '');
     const p = $('#stProxy');
     p.textContent = st.proxy_connected ? 'Connector ✓' : 'Connector nicht verbunden';
     p.className = 'pill ' + (st.proxy_connected ? 'ok' : 'warn');
