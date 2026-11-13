@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
     "gspro_port": 921,
     "phone_control_port": 9300,
     "http_port": 8090,
-    "clip_pre_seconds": 3.6,           # Aufnahme beginnt 3,6 s vor dem R10-Trigger
+    "clip_pre_seconds": 6.0,           # Aufnahme beginnt 6 s vor dem R10-Trigger (Export wird zugeschnitten)
     "clip_post_seconds": 0.5,
     "trigger_delay_seconds": 0.0,
     "shots_dir": "shots",
@@ -51,7 +51,8 @@ DEFAULT_CONFIG = {
     "export_playback_fps": 30,         # 240 fps -> 30 fps = Zeitlupe 1/8, jedes Bild sichtbar
     "ffmpeg_path": "",                 # leer = automatisch suchen
     "auto_analysis": True,             # Treffmoment + Schaftlinien automatisch erkennen (OpenCV)
-    "export_trim": False,              # True = Export nur vom Ansprechen bis kurz nach dem Treffmoment
+    "export_trim": True,               # Export vom Ansprechen (kurz davor) bis kurz nach dem Treffmoment
+    "only_complete_shots": True,       # Schuesse ohne Treffmoment/Ansprech-/Schlaglinie verwerfen
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
@@ -71,12 +72,18 @@ class Config:
         self.data = dict(DEFAULT_CONFIG)
         if os.path.exists(path):
             self.data.update(self._load(path))
-        self.data.pop("export_paths", None)            # Schwungbahn gibt es nicht mehr
+        self.data.pop("export_paths", None)            # Schlaegerkopf-Bahn gibt es nicht mehr
         # einmalig: "quer" lieferte bei diesem Aufbau ein Bild auf dem Kopf -> auf quer_180 umstellen
         if self.data.get("orientation_version") != 2:
             if self.data.get("clip_orientation") == "quer":
                 self.data["clip_orientation"] = "quer_180"
             self.data["orientation_version"] = 2
+        # einmalig: langer Vorlauf (es fehlte manchmal ein Stueck vom Schwung), Export zuschneiden
+        if self.data.get("settings_version", 0) < 3:
+            self.data["clip_pre_seconds"] = max(6.0, float(self.data.get("clip_pre_seconds") or 0))
+            self.data["export_trim"] = True
+            self.data["only_complete_shots"] = True
+            self.data["settings_version"] = 3
         self.save()
 
     @staticmethod

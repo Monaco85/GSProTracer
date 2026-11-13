@@ -36,7 +36,7 @@ def main():
         ref = json.load(open(ref_path, encoding="utf-8"))
         video = json.load(open(os.path.join(d, "video.json"), encoding="utf-8"))
         w, h = video["width"], video["height"]
-        res = swing_analysis.analyze(os.path.join(d, "clip.mp4"))
+        res = swing_analysis.analyze(os.path.join(d, "clip.mp4"), video.get("trigger_time"))
         print(f"== {sid}")
         if "error" in res:
             print("  FEHLER:", res["error"]); failed += 1; continue

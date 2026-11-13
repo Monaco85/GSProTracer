@@ -394,7 +394,7 @@ class Exporter:
         rows = max(len(left), len(right))
         panel_h = pad + hs + pad // 2 + rows * (fs + lh) + pad
         if landscape:
-            # quer: kompakter Kasten oben links - unten liegen Ball und Schwungbahn
+            # quer: kompakter Kasten oben links - unten liegen Ball und Schlaeger
             x1, x2 = pad, pad + int(fs * 7.2)
             x3, x4 = pad + int(fs * 14.8), pad + int(fs * 21.6)
             panel_w = x4 + int(fs * 5.6) + pad
@@ -420,6 +420,22 @@ class Exporter:
         notes = self.store.read_json(sid, "notes.json") or {}
         if self.cfg.data.get("auto_analysis", True) and notes.get("analysis") is None:
             notes = self._auto_analyze(sid, clip, notes, video)
+            # nur vollstaendig erkannte Schuesse behalten (Treffmoment, Ansprech- und Schlaglinie)
+            if (self.cfg.data.get("only_complete_shots", True) and not record.get("test")
+                    and "analysis" in notes):
+                labels = {l.get("label") for l in notes.get("lines") or []}
+                missing = [n for n, ok in (("Treffmoment", notes.get("impact_time") is not None),
+                                           ("Ansprechlinie", "Ansprechen" in labels),
+                                           ("Schlaglinie", "Abschwung" in labels)) if not ok]
+                if missing:
+                    log.warning("Schuss %s nicht gespeichert - nicht erkannt: %s", sid, ", ".join(missing))
+                    for name in list(files):
+                        try:
+                            os.remove(os.path.join(shot_dir, name))
+                        except OSError:
+                            pass
+                    self.store.delete(sid)
+                    return
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         t1 = float(sw["end"]) if self.cfg.data.get("export_trim", True) and sw.get("end") else None

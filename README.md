@@ -51,7 +51,7 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
 - **Analyse-Seite** <http://localhost:8090>: Zeitlupe bis 1/16, Bild für Bild, Ball-/Schlägerdaten in km/h,
   Smash, Face-to-Path, Notizen, Durchschnitt pro Schläger, CSV-Export (Excel)
 - **Kamera ausrichten** <http://localhost:8090/live>: Live-Bild mit Raster und Markierungen
-- **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, aufgehellt, ca. 7 MB
+- **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, aufgehellt, zugeschnitten auf den Schwung
 - **Automatische Analyse** (OpenCV): Treffmoment, Ansprechen, **Schaftlinien** beim Ansprechen und im Abschwung
   inkl. Winkel; Linien lassen sich auch von Hand zeichnen
 
@@ -147,10 +147,10 @@ Rechts: Ball- und Schlägerdaten (km/h), Smash, Face-to-Path, Video-Infos, **Vid
 
 ### Kalibrierung der R10-Verzögerung
 
-Anfangs nimmt die App großzügig **4 s vor bis 0,5 s nach** dem Eintreffen der R10-Daten auf.
-Der Treffmoment wird automatisch erkannt (oder per Taste `I` markiert). Nach einigen Schlägen:
-**Einstellungen → Vorschlag übernehmen → Speichern**. Danach sind die Clips ca. **1,5 s vor bis 1,0 s nach**
-dem Treffmoment. Gilt sofort, ohne Neustart.
+Die App nimmt großzügig **6 s vor bis 0,5 s nach** dem Eintreffen der R10-Daten auf, damit vom Schwung nichts
+fehlt. Das Export-Video wird danach automatisch zugeschnitten: kurz vor dem Ansprechen bis kurz nach dem Treffen.
+Der Treffmoment wird automatisch erkannt (oder per Taste `I` markiert). Nach einigen Schlägen kann unter
+**Einstellungen → Vorgeschlagene R10-Verzögerung übernehmen → Speichern** die Verzögerung gesetzt werden.
 
 ---
 
@@ -164,8 +164,9 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
   verlängert bis zum Bildrand (Schwungebene)
-- **Ganzer Clip** in guter Qualität (CRF 20) → ca. **7 MB** pro Schlag. Kleiner: `export_trim: true` und/oder
-  `export_crf: 28` (ca. 0,5 MB)
+- **Zugeschnitten** von kurz vor dem Ansprechen bis kurz nach dem Treffen, gute Qualität (CRF 20)
+- **Nur vollständige Schüsse:** Wird Treffmoment, Ansprech- oder Schlaglinie nicht erkannt, wird der Schuss verworfen
+  (steht im Tracer-Fenster). Abschalten: `only_complete_shots: false`
 
 **So funktioniert die automatische Analyse** (`pc\swing_analysis.py`):
 1. *Treffmoment:* Der Ball ist der hellste Punkt unten im Bild; beim Treffen verschwindet er schlagartig.
@@ -189,18 +190,19 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `gspro_host` / `gspro_port` | 127.0.0.1 / 921 | GSPro OpenAPI |
 | `phone_control_port` | 9300 | Steuerverbindung zum Handy |
 | `http_port` | 8090 | Analyse-Seite und Upload |
-| `clip_pre_seconds` / `clip_post_seconds` | 3,6 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
+| `clip_pre_seconds` / `clip_post_seconds` | 6,0 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
 | `trigger_delay_seconds` | 0 | R10-Verzögerung (per Kalibrierung) |
 | `shots_dir` / `exports_dir` | shots / exports | Speicherorte |
 | `export_playback_fps` | 30 | 30 = Zeitlupe 1/8, 60 = 1/4, 240 = Echtzeit |
-| `export_crf` | 20 | Qualität: 20 ≈ 7 MB, 23 ≈ 3–4 MB, 28 ≈ 0,5 MB (niedriger = besser/größer) |
+| `export_crf` | 20 | Qualität: 20 = sehr gut, 23 = gut, 28 = klein (niedriger = besser/größer) |
 | `export_preset` | medium | x264-Preset (`slow` = etwas kleiner, dauert länger) |
 | `export_brightness` | 0,6 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
 | `clip_orientation` | quer_180 | Videolage, verlustfrei beim Empfang: `quer_180` = Sensorbild auf den Kopf gestellt, `quer` = Sensorbild, leer = wie aufgenommen. Auch auf der Analyse-Seite unter Einstellungen → Videolage; vorhandene Clips werden mitgedreht, Linien und Videos neu erstellt |
 | `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
 | `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
-| `export_trim` | false | true = Export nur vom Schwung (Ansprechen − 0,25 s bis Treffen + 0,6 s) |
+| `export_trim` | true | Export ab kurz vor dem Ansprechen (0,4 s, in Zeitlupe ca. 3 s) bis 0,6 s nach dem Treffen |
+| `only_complete_shots` | true | Schuss nur behalten, wenn Treffmoment, Ansprechlinie und Schlaglinie erkannt wurden (Testclips immer) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
 | `ffmpeg_path` | "" | leer = automatisch suchen |
 

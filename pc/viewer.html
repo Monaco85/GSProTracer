@@ -107,7 +107,7 @@ dialog::backdrop{background:#0008}
   <h3>Kalibrierung</h3>
   <p class="small">Bei einigen Schüssen den Treffmoment mit „Impact hier“ markieren. Daraus wird die R10-Verzögerung berechnet.</p>
   <div id="calib" class="small">–</div>
-  <div class="row"><button id="bApplyCal">Vorschlag übernehmen (+ Clip 1,5 s / 1,0 s)</button></div>
+  <div class="row"><button id="bApplyCal">Vorgeschlagene R10-Verzögerung übernehmen</button></div>
   <div class="row" style="justify-content:flex-end;margin-top:12px"><button id="bCancel">Abbrechen</button><button id="bSave" class="on">Speichern</button></div>
 </dialog>
 
@@ -367,7 +367,7 @@ $('#btnSettings').onclick = async () => {
   const c = await (await fetch('/api/calibration')).json();
   $('#calib').textContent = c.samples ? `${c.samples} markierte Schüsse → R10-Verzögerung ≈ ${fmt(c.suggested_delay, 2)} s (Streuung ${fmt(c.min, 2)}–${fmt(c.max, 2)} s)` : 'Noch keine markierten Schüsse.';
   $('#bApplyCal').disabled = !c.samples;
-  $('#bApplyCal').onclick = () => { $('#cDelay').value = c.suggested_delay; $('#cPre').value = 1.5; $('#cPost').value = 1.0; };
+  $('#bApplyCal').onclick = () => { $('#cDelay').value = c.suggested_delay; };
   $('#dlg').showModal();
 };
 $('#bCancel').onclick = () => $('#dlg').close();

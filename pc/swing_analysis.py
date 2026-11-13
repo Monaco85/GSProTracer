@@ -26,6 +26,9 @@ except ImportError:  # Analyse ist optional
     AVAILABLE = False
 
 
+ADDRESS_LEAD = 0.4   # Sekunden vor dem Ansprech-Bild, mit denen das Export-Video beginnt (1/8 Zeitlupe: ~3 s)
+
+
 def _read_gray(path, max_frames=2400):
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 240.0
@@ -44,15 +47,18 @@ def _smooth(a, k):
     return np.convolve(a, np.ones(k) / k, mode="same")
 
 
-def find_impact(frames, fps, lower=0.5):
-    """Index des ersten Bilds nach dem Treffen (Ball weg) und Ballposition."""
+def find_impact(frames, fps, lower=0.5, lo=None, hi=None):
+    """
+    Index des ersten Bilds nach dem Treffen (Ball weg) und Ballposition.
+    lo/hi: nur in diesem Bildbereich suchen (rund um den R10-Trigger).
+    """
     H = frames[0].shape[0]
     y0 = int(H * lower)
     m = np.array([cv2.GaussianBlur(f[y0:], (7, 7), 0).max() for f in frames], dtype=float)
     n = len(m)
     win, hold = int(0.25 * fps), int(0.12 * fps)
     best = None
-    for i in range(win, n - hold):
+    for i in range(max(win, lo or 0), min(n - hold, hi if hi is not None else n)):
         before = np.median(m[i - win:i])
         if before < 90:                       # vorher kein heller Ball
             continue
@@ -162,7 +168,13 @@ def analyze(path, trigger_time=None):
     if len(frames) < fps * 0.8:
         return {"error": "Clip zu kurz"}
     H, W = frames[0].shape
-    impact, ball = find_impact(frames, fps)
+    impact = ball = None
+    if trigger_time is not None:
+        # R10 meldet den Schlag ca. 0,5-1,5 s nach dem Treffen -> dort suchen (langer Vorlauf im Clip!)
+        impact, ball = find_impact(frames, fps, lo=int((trigger_time - 2.5) * fps),
+                                   hi=int((trigger_time + 0.2) * fps))
+    if impact is None:
+        impact, ball = find_impact(frames, fps)
     if impact is None:
         return {"error": "Treffmoment nicht erkannt (Ball nicht sichtbar?)"}
     res = {"impact_time": round(impact / fps, 4), "ball": [ball[0] / W, ball[1] / H], "lines": []}
@@ -202,8 +214,8 @@ def analyze(path, trigger_time=None):
                                  "color": "#ff9800", "label": "Abschwung", "from": round(d / fps, 4),
                                  "extend": True, "auto": True, "frame_time": round(d / fps, 4)})
             break
-    # Schnittfenster fuer den Export: kurz vor dem Rueckschwung bis kurz nach dem Treffen
-    start = (address / fps - 0.25) if address is not None else (impact / fps - 1.6)
+    # Schnittfenster fuer den Export: Ansprechposition kurz zeigen, dann Schwung bis kurz nach dem Treffen
+    start = (address / fps - ADDRESS_LEAD) if address is not None else (impact / fps - 2.5)
     res["swing_start"] = round(max(0.0, start), 4)
     res["swing_end"] = round(min(len(frames) / fps, impact / fps + 0.6), 4)
     return res
