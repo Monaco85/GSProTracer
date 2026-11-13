@@ -100,6 +100,10 @@ dialog::backdrop{background:#0008}
   <div class="row"><label style="width:220px">Vorlauf vor Impact (s)</label><input type="number" step="0.1" id="cPre"></div>
   <div class="row"><label style="width:220px">Nachlauf nach Impact (s)</label><input type="number" step="0.1" id="cPost"></div>
   <div class="row"><label style="width:220px">R10-Verzögerung (s)</label><input type="number" step="0.05" id="cDelay"></div>
+  <div class="row"><label style="width:220px">Videolage</label><select id="cOrient">
+    <option value="quer_180">quer, 180° gedreht</option><option value="quer">quer</option>
+    <option value="">wie aufgenommen</option></select></div>
+  <div class="row small" style="opacity:.7">Steht das Video auf dem Kopf, hier umstellen – alle Clips werden verlustfrei gedreht, Linien und Videos neu erstellt.</div>
   <h3>Kalibrierung</h3>
   <p class="small">Bei einigen Schüssen den Treffmoment mit „Impact hier“ markieren. Daraus wird die R10-Verzögerung berechnet.</p>
   <div id="calib" class="small">–</div>
@@ -313,39 +317,9 @@ const LINE_TYPES = {
   help: { label: '', color: '#ffeb3b', fromZero: true },
 };
 function savedLines() { return (cur && cur.notes && cur.notes.lines) || []; }
-// Schwungbahn aus der automatischen Analyse: Schlaegerkopf beim Ausholen / im Abschwung, waechst mit der Zeit
-function drawPaths(W, H, t) {
-  const paths = (cur && cur.notes && cur.notes.analysis && cur.notes.analysis.paths) || [];
-  for (const p of paths) {
-    const pts = (p.points || []).filter(q => q[0] <= t + 1e-6);
-    if (!pts.length) continue;
-    const step = Math.max(1, Math.floor(p.points.length / 14));
-    ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.strokeStyle = p.color;
-    for (let k = 0; p.shafts !== false && k < pts.length; k += step) {
-      ctx.beginPath(); ctx.moveTo(pts[k][1] * W, pts[k][2] * H); ctx.lineTo(pts[k][3] * W, pts[k][4] * H); ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    for (const [lw, col] of [[6, 'rgba(0,0,0,.6)'], [3, p.color]]) {
-      ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath();
-      pts.forEach((q, i) => i ? ctx.lineTo(q[1] * W, q[2] * H) : ctx.moveTo(q[1] * W, q[2] * H)); ctx.stroke();
-    }
-    // Pfeilspitze in Bewegungsrichtung des Schlaegerkopfs
-    const l = pts[pts.length - 1], hx = l[1] * W, hy = l[2] * H;
-    const b = pts.slice(0, -1).reverse().find(q => Math.hypot(q[1] * W - hx, q[2] * H - hy) > 8);
-    ctx.fillStyle = p.color;
-    if (b) {
-      const dx = hx - b[1] * W, dy = hy - b[2] * H, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, sz = 13;
-      ctx.beginPath(); ctx.moveTo(hx + ux * 3, hy + uy * 3);
-      ctx.lineTo(hx - ux * sz - uy * sz * 0.6, hy - uy * sz + ux * sz * 0.6);
-      ctx.lineTo(hx - ux * sz + uy * sz * 0.6, hy - uy * sz - ux * sz * 0.6); ctx.closePath();
-      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.stroke(); ctx.fill();
-    } else { ctx.beginPath(); ctx.arc(hx, hy, 5, 0, 7); ctx.fill(); }
-  }
-}
 function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
   const W = cv.width, H = cv.height, t = vid.currentTime || 0;
-  if (cfg.export_paths !== false) drawPaths(W, H, t);
   const all = savedLines().filter(l => t + 1e-6 >= (l.from || 0));
   if (drag) all.push(drag);
   for (const l of all) {
@@ -367,8 +341,6 @@ function draw() {
   }
 }
 vid.addEventListener('timeupdate', draw); vid.addEventListener('seeked', draw);
-// beim Abspielen fluessig nachzeichnen (timeupdate kommt nur ~4x pro Sekunde)
-vid.addEventListener('play', () => { const f = () => { draw(); if (!vid.paused && !vid.ended) requestAnimationFrame(f); }; f(); });
 const rel = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
 cv.onmousedown = e => {
   if (!cur) return; const p = rel(e); const ty = LINE_TYPES[$('#lineType').value];
@@ -391,7 +363,7 @@ $('#bClear').onclick = async () => { if (cur && confirm('Alle Linien dieses Schl
 
 // ---------------------------------------------------------------- settings dialog
 $('#btnSettings').onclick = async () => {
-  $('#cPre').value = cfg.clip_pre_seconds; $('#cPost').value = cfg.clip_post_seconds; $('#cDelay').value = cfg.trigger_delay_seconds;
+  $('#cPre').value = cfg.clip_pre_seconds; $('#cPost').value = cfg.clip_post_seconds; $('#cDelay').value = cfg.trigger_delay_seconds; $('#cOrient').value = cfg.clip_orientation ?? 'quer_180';
   const c = await (await fetch('/api/calibration')).json();
   $('#calib').textContent = c.samples ? `${c.samples} markierte Schüsse → R10-Verzögerung ≈ ${fmt(c.suggested_delay, 2)} s (Streuung ${fmt(c.min, 2)}–${fmt(c.max, 2)} s)` : 'Noch keine markierten Schüsse.';
   $('#bApplyCal').disabled = !c.samples;
@@ -400,7 +372,8 @@ $('#btnSettings').onclick = async () => {
 };
 $('#bCancel').onclick = () => $('#dlg').close();
 $('#bSave').onclick = async () => {
-  cfg = await (await fetch('/api/config', { method: 'POST', body: JSON.stringify({ clip_pre_seconds: +$('#cPre').value, clip_post_seconds: +$('#cPost').value, trigger_delay_seconds: +$('#cDelay').value }) })).json();
+  cfg = await (await fetch('/api/config', { method: 'POST', body: JSON.stringify({ clip_pre_seconds: +$('#cPre').value, clip_post_seconds: +$('#cPost').value, trigger_delay_seconds: +$('#cDelay').value, clip_orientation: $('#cOrient').value }) })).json();
+  poll.sig = null;
   $('#dlg').close();
 };
 </script>

@@ -80,37 +80,56 @@ def display_size(ffmpeg, clip):
         return None
 
 
+def clip_rotation(ffmpeg, clip):
+    """Drehvermerk der MP4 in Grad (0, 90, 180, 270) oder None."""
+    probe = os.path.join(os.path.dirname(ffmpeg), "ffprobe" + (".exe" if ffmpeg.lower().endswith(".exe") else ""))
+    if not os.path.isfile(probe):
+        probe = shutil.which("ffprobe")
+    if not probe:
+        return None
+    try:
+        res = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream_side_data=rotation:stream_tags=rotate", "-of", "json", clip],
+                             capture_output=True, text=True, timeout=30,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        st = json.loads(res.stdout)["streams"][0]
+        for sd in st.get("side_data_list") or []:
+            if "rotation" in sd:
+                return int(round(float(sd["rotation"]))) % 360
+        return int((st.get("tags") or {}).get("rotate", 0)) % 360
+    except Exception:
+        return None
+
+
 def fix_orientation(ffmpeg, clip, mode="quer"):
     """
-    Handy liegt quer, App hat aber hochkant gespeichert (Drehvermerk 90/270 in der MP4):
-    Der Sensor liefert dann schon ein aufrechtes Querbild, nur der Vermerk kippt es. Vermerk ersetzen,
-    ohne neu zu kodieren (verlustfrei, Sekundenbruchteile).
-    mode: "quer" (Vermerk 0), "quer_180" (Handy andersherum quer), sonst nichts tun.
+    Clip verlustfrei (nur Drehvermerk, kein Neukodieren) so stellen, wie das quer liegende Handy filmt:
+    "quer"     = Sensorbild unveraendert (Drehvermerk 0)
+    "quer_180" = Sensorbild auf den Kopf gestellt (Drehvermerk 180) - wenn das Handy andersherum liegt
+    sonst ("") nichts tun. Wirkt fuer alte (hochkant gespeicherte) und neue (quer gespeicherte) Clips gleich.
     Rueckgabe: neue (breite, hoehe) oder None, wenn nichts geaendert wurde.
     """
     if mode not in ("quer", "quer_180") or not ffmpeg:
         return None
-    size = display_size(ffmpeg, clip)
-    if not size or size[0] >= size[1]:
-        return None                       # schon quer (oder unbekannt)
-    angle = "180" if mode == "quer_180" else "0"
+    target = 180 if mode == "quer_180" else 0
+    cur = clip_rotation(ffmpeg, clip)
+    if cur is None or cur == target:
+        return None
     tmp = clip + ".rot.mp4"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    for opts in (["-display_rotation", angle, "-i", clip],                    # FFmpeg >= 6
-                 ["-i", clip, "-metadata:s:v:0", f"rotate={angle}"]):          # aeltere Versionen
+    for opts in (["-display_rotation", str(target), "-i", clip],                 # FFmpeg >= 6
+                 ["-i", clip, "-metadata:s:v:0", f"rotate={target}"]):          # aeltere Versionen
         res = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y"] + opts +
                              ["-map", "0", "-c", "copy", tmp], capture_output=True, text=True,
                              timeout=60, creationflags=flags)
-        if res.returncode == 0 and os.path.exists(tmp):
-            new = display_size(ffmpeg, tmp)
-            if new and new[0] > new[1]:
-                os.replace(tmp, clip)
-                return new
+        if res.returncode == 0 and os.path.exists(tmp) and clip_rotation(ffmpeg, tmp) == target:
+            os.replace(tmp, clip)
+            return display_size(ffmpeg, clip)
         try:
             os.remove(tmp)
         except OSError:
             pass
-    log.warning("Clip %s konnte nicht ins Querformat gedreht werden", clip)
+    log.warning("Clip %s konnte nicht gedreht werden", clip)
     return None
 
 
@@ -249,7 +268,7 @@ class Exporter:
             return notes
         res = swing_analysis.analyze(clip, (video or {}).get("trigger_time"))
         notes = self.store.read_json(sid, "notes.json") or {}   # frisch lesen (Viewer koennte geschrieben haben)
-        notes["analysis"] = {k: v for k, v in res.items() if k != "lines"}
+        notes["analysis"] = {k: v for k, v in res.items() if k not in ("lines", "paths")}
         if "error" in res:
             log.info("Analyse %s: %s", sid, res["error"])
         else:
@@ -317,123 +336,6 @@ class Exporter:
                 f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
                 f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={lx}:y={ly}:enable='gte(t,{start:.4f})'")
         return inputs, filters
-
-    def _path_overlay(self, paths, w, h, shot_dir, fs, files, font_bold, t0=0.0, total=60.0):
-        """
-        Schwungbahn (Schlaegerkopf beim Ausholen / im Abschwung) als wachsende Linie.
-        Erzeugt pro Bahnpunkt ein transparentes PNG mit dem bisherigen Verlauf und eine
-        FFmpeg-concat-Liste, die jedes Bild bis zum naechsten Punkt zeigt.
-        Rueckgabe: (Name der concat-Liste oder None, [drawtext-Filter fuer die Legende])
-        """
-        try:
-            import cv2
-            import numpy as np
-        except ImportError:
-            return None, []
-        import math
-        events = []                     # (zeit, pfad-index, punkt-index)
-        for pi, p in enumerate(paths):
-            for k, pt in enumerate(p.get("points") or []):
-                events.append((float(pt[0]), pi, k))
-        if not events:
-            return None, []
-        events.sort()
-        D = max(w, h)
-        thick = max(3, int(round(D * 0.005)))
-        thin = max(1, int(round(D * 0.0018)))
-        bgr = []
-        for p in paths:
-            col = str(p.get("color", "#29b6f6")).lstrip("#")
-            bgr.append((int(col[4:6], 16), int(col[2:4], 16), int(col[0:2], 16)))
-
-        def render(upto):
-            """upto: {pfad-index: anzahl sichtbarer punkte}"""
-            shafts = np.zeros((h, w, 3), np.uint8)
-            shafts_a = np.zeros((h, w), np.uint8)
-            img = np.zeros((h, w, 3), np.uint8)
-            alpha = np.zeros((h, w), np.uint8)
-            for pi, n in upto.items():
-                pts = paths[pi]["points"][:n]
-                step = max(1, len(paths[pi]["points"]) // 14)     # etwa 14 Schaftlinien pro Bahn
-                for k in (range(0, len(pts), step) if paths[pi].get("shafts", True) else ()):
-                    _, hx, hy, sx, sy = pts[k][:5]
-                    a, b = (int(hx * w), int(hy * h)), (int(sx * w), int(sy * h))
-                    cv2.line(shafts, a, b, bgr[pi], thin, cv2.LINE_AA)
-                    cv2.line(shafts_a, a, b, 150, thin, cv2.LINE_AA)
-                poly = np.array([[int(q[1] * w), int(q[2] * h)] for q in pts], np.int32).reshape(-1, 1, 2)
-                if len(pts) >= 2:
-                    cv2.polylines(img, [poly], False, (0, 0, 0), thick + 4, cv2.LINE_AA)
-                    cv2.polylines(alpha, [poly], False, 150, thick + 4, cv2.LINE_AA)
-                    cv2.polylines(img, [poly], False, bgr[pi], thick, cv2.LINE_AA)
-                    cv2.polylines(alpha, [poly], False, 255, thick, cv2.LINE_AA)
-                hx, hy = pts[-1][1] * w, pts[-1][2] * h
-                # Pfeilspitze in Bewegungsrichtung des Schlaegerkopfs (Vektor)
-                back = next((q for q in reversed(pts[:-1])
-                             if math.hypot(q[1] * w - hx, q[2] * h - hy) > thick * 3), None)
-                if back is not None:
-                    dx, dy = hx - back[1] * w, hy - back[2] * h
-                    L = math.hypot(dx, dy)
-                    ux, uy = dx / L, dy / L
-                    size = thick * 4.5
-                    tip = (hx + ux * thick, hy + uy * thick)
-                    tri = np.array([tip,
-                                    (tip[0] - ux * size - uy * size * 0.6, tip[1] - uy * size + ux * size * 0.6),
-                                    (tip[0] - ux * size + uy * size * 0.6, tip[1] - uy * size - ux * size * 0.6)],
-                                   np.int32)
-                    cv2.polylines(img, [tri], True, (0, 0, 0), 3, cv2.LINE_AA)
-                    cv2.fillPoly(img, [tri], bgr[pi], cv2.LINE_AA)
-                    cv2.polylines(alpha, [tri], True, 200, 3, cv2.LINE_AA)
-                    cv2.fillPoly(alpha, [tri], 255, cv2.LINE_AA)
-                else:
-                    cv2.circle(img, (int(hx), int(hy)), thick + 2, bgr[pi], -1, cv2.LINE_AA)
-                    cv2.circle(alpha, (int(hx), int(hy)), thick + 2, 255, -1, cv2.LINE_AA)
-            m = alpha > 0
-            shafts[m] = img[m]
-            shafts_a = np.maximum(shafts_a, alpha)
-            return np.dstack([shafts, shafts_a])
-
-        lst, upto, last_t = [], {}, None
-        empty = "_ov_path_0000.png"
-        cv2.imwrite(os.path.join(shot_dir, empty), np.zeros((h, w, 4), np.uint8))
-        files[empty] = ""
-        cur_file, cur_start = empty, 0.0
-        for n, (t, pi, k) in enumerate(events, start=1):
-            upto[pi] = k + 1
-            ts = max(0.0, t - t0)
-            name = f"_ov_path_{n:04d}.png"
-            cv2.imwrite(os.path.join(shot_dir, name), render(upto))
-            files[name] = ""
-            if ts > cur_start:
-                lst.append((cur_file, ts - cur_start))
-                cur_start = ts
-            cur_file = name
-        lst.append((cur_file, max(0.1, total - cur_start)))   # letzter Stand bleibt bis zum Ende stehen
-        lst.append((cur_file, None))
-        concat = "_ov_paths.txt"
-        with open(os.path.join(shot_dir, concat), "w", encoding="utf-8", newline="\n") as f:
-            f.write("ffconcat version 1.0\n")
-            for name, dur in lst:
-                f.write(f"file {name}\n")
-                if dur is not None:
-                    f.write(f"duration {dur:.5f}\n")
-        files[concat] = ""
-
-        # Legende oben links: erscheint, sobald die jeweilige Bahn beginnt
-        filters = []
-        for pi, p in enumerate(paths):
-            if not p.get("points"):
-                continue
-            tf = f"_ov_plbl{pi}.txt"
-            with open(os.path.join(shot_dir, tf), "w", encoding="utf-8", newline="\n") as f:
-                f.write(p.get("label", ""))
-            files[tf] = ""
-            start = max(0.0, float(p["points"][0][0]) - t0)
-            col = str(p.get("color", "#29b6f6")).lstrip("#")
-            filters.append(
-                f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
-                f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x=w-tw-{int(fs * 0.7)}"
-                f":y={int(fs * 2.9 + pi * fs * 1.9)}:enable='gte(t,{start:.4f})'")
-        return concat, filters
 
     def _brighten_filter(self):
         """Aufhellen per Tonwertkurve: Schatten/Mitten heller, Schwarz bleibt schwarz, Lichter bleiben."""
@@ -516,20 +418,15 @@ class Exporter:
 
         # Automatische Analyse (Treffmoment, Ansprechen, Schaftlinien) - einmal pro Clip
         notes = self.store.read_json(sid, "notes.json") or {}
-        ana = notes.get("analysis")
-        if self.cfg.data.get("auto_analysis", True) and (ana is None or ("paths" not in ana and "error" not in ana)):
+        if self.cfg.data.get("auto_analysis", True) and notes.get("analysis") is None:
             notes = self._auto_analyze(sid, clip, notes, video)
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         t1 = float(sw["end"]) if self.cfg.data.get("export_trim", True) and sw.get("end") else None
         # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
         line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)
-        # Schwungbahn (Ausholen / Abschwung) aus der automatischen Analyse
-        paths = (notes.get("analysis") or {}).get("paths") or [] if self.cfg.data.get("export_paths", True) else []
-        total = 600.0   # letzter Bahn-Stand "lang genug"; Ende bestimmt das Video selbst (shortest=1)
-        path_list, path_filters = self._path_overlay(paths, w, h, shot_dir, fs, files, fb, t0, total)
 
-        vf = ",".join(line_filters + path_filters + [
+        vf = ",".join(line_filters + [
             panel_box,
             dt("_ov_head.txt", fb, hs, x1, top, "0xFFEB3B"),
             dt("_ov_l1.txt", fr, fs, x1, body, "0xB0BEC5"),
@@ -549,18 +446,12 @@ class Exporter:
         cmd += ["-i", "clip.mp4"]
         for png in line_inputs:
             cmd += ["-loop", "1", "-i", png]
-        if path_list:
-            cmd += ["-f", "concat", "-safe", "0", "-i", path_list]
-        # [0:v] -> aufhellen -> Schwungbahn -> Linien -> Panel/Texte (Overlay braucht filter_complex)
+        # [0:v] -> aufhellen -> Linien -> Panel/Texte (Overlay braucht filter_complex)
         chain, cur = [], "[0:v]"
         bright = self._brighten_filter()
         if bright:
             chain.append(f"{cur}{bright}[br]")
             cur = "[br]"
-        if path_list:
-            pi = len(line_inputs) + 1
-            chain.append(f"{cur}[{pi}:v]overlay=0:0:shortest=1[pa]")
-            cur = "[pa]"
         for i, (png, start) in enumerate(line_inputs.items(), start=1):
             chain.append(f"{cur}[{i}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[l{i}]")
             cur = f"[l{i}]"

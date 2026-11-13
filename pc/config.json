@@ -16,9 +16,9 @@
   "export_crf": 20,
   "export_preset": "medium",
   "export_brightness": 0.6,
-  "export_paths": true,
   "export_denoise": 3,
   "export_delay_seconds": 8,
   "export_threads": 2,
-  "clip_orientation": "quer"
+  "clip_orientation": "quer_180",
+  "orientation_version": 2
 }

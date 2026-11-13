@@ -9,8 +9,6 @@ Ablauf:
    (Schlaeger oben) -> Bewegung (Abschwung) -> Treffmoment. Ansprechen = Bild vor dem Rueckschwung.
 4. Schaft: Differenzbild (Bild mit Schlaeger minus Bild ohne Schlaeger in Ballnaehe) + Hough-Linien.
    Gewaehlt wird die laengste Linie, die zum Schlaegerkopf neben dem Ball zeigt.
-5. Schwungbahn: Schlaegerkopf Bild fuer Bild verfolgen (Schaft per Hough, Kopf = kompakter Fleck am
-   Schaftende), beim Ausholen vorwaerts ab dem Ansprechen, im Abschwung rueckwaerts ab dem Treffmoment.
 
 Benoetigt: pip install opencv-python-headless numpy
 """
@@ -153,168 +151,6 @@ def detect_shaft(frame, ref, ball, head_hint=None):
     return float(x1), float(y1), float(x2), float(y2)
 
 
-def _club_mask(frame, ref_blur):
-    f = cv2.GaussianBlur(frame, (5, 5), 0)
-    m = (cv2.absdiff(f, ref_blur) > 16).astype(np.uint8) * 255
-    return cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-
-
-def locate_club_head(frame, ref_blur, prev, max_jump, prev_angle=None, reach=0.08):
-    """
-    Schlaegerkopf in einem Bild finden: Schaft = Hough-Linie im Differenzbild (gegen ein Bild ohne
-    Schlaeger), Kopf = kompakter Fleck (bleibt nach Erosion uebrig) am unteren Ende des Schafts,
-    sonst das untere Ende der Linie. Gewaehlt wird der Kandidat, der zur vorherigen Position passt.
-    Rueckgabe (kopf_x, kopf_y, schaftwinkel, schaft_oben_x, schaft_oben_y) oder None.
-    """
-    H, W = frame.shape
-    D = max(W, H)
-    m = _club_mask(frame, ref_blur)
-    segs = cv2.HoughLinesP(m, 1, np.pi / 180, threshold=30,
-                           minLineLength=int(0.06 * D), maxLineGap=int(0.03 * D))
-    if segs is None:
-        return None
-    k = max(5, int(round(D * 0.0055)) | 1)
-    er = cv2.erode(m, np.ones((k, k), np.uint8))
-    n, _, stats, cents = cv2.connectedComponentsWithStats(er)
-    blobs = [(cents[j][0], cents[j][1]) for j in range(1, n)
-             if stats[j, cv2.CC_STAT_AREA] >= (D * 0.004) ** 2]
-    best, best_score = None, 0.0
-    for x1, y1, x2, y2 in segs.reshape(-1, 4).tolist():
-        if y1 < y2:                                   # Punkt 1 = unten (Kopf), Punkt 2 = oben
-            x1, y1, x2, y2 = x2, y2, x1, y1
-        L = math.hypot(x2 - x1, y2 - y1)
-        if L < 1:
-            continue
-        ang = math.degrees(math.atan2(y1 - y2, x2 - x1))   # 0..180, Neigung des Schafts
-        if prev_angle is not None and abs(ang - prev_angle) > 35:
-            continue
-        ux, uy = (x1 - x2) / L, (y1 - y2) / L             # Richtung Kopf
-        hx, hy = x1, y1
-        far = -1.0
-        for bx, by in blobs:
-            px, py = bx - x2, by - y2
-            proj, perp = px * ux + py * uy, abs(-px * uy + py * ux)
-            if perp < 0.025 * D and L * 0.75 < proj < L + reach * D and proj > far:
-                hx, hy, far = bx, by, proj
-        if not (0.015 * W < hx < 0.985 * W and 0.015 * H < hy < 0.985 * H):
-            continue                                      # Kopf am Bildrand = schon draussen
-        d = math.hypot(hx - prev[0], hy - prev[1])
-        if d > max_jump:
-            continue
-        score = L * (1.6 if far >= 0 else 1.0) / (1.0 + d / (0.03 * D))
-        if score > best_score:
-            best, best_score = (float(hx), float(hy), ang, float(x2), float(y2)), score
-    return best
-
-
-def _smooth_path(pts, max_dev):
-    """Ausreisser entfernen (Abweichung vom Median der Nachbarn) und leicht glaetten."""
-    if len(pts) < 3:
-        return pts
-    keep = []
-    for i, p in enumerate(pts):
-        nb = pts[max(0, i - 2):i] + pts[i + 1:i + 3]
-        mx = float(np.median([q[1] for q in nb]))
-        my = float(np.median([q[2] for q in nb]))
-        if math.hypot(p[1] - mx, p[2] - my) <= max_dev:
-            keep.append(p)
-    out = []
-    for i, p in enumerate(keep):
-        nb = keep[max(0, i - 1):i + 2]
-        out.append((p[0], sum(q[1] for q in nb) / len(nb), sum(q[2] for q in nb) / len(nb)) + tuple(p[3:]))
-    if keep:                                    # Endpunkte nicht verschieben
-        out[0], out[-1] = keep[0], keep[-1]
-    return out
-
-
-def track_club_head(frames, ref, start_pos, indices, fps, max_jump, min_step=0.0, reach=0.08):
-    """
-    Schlaegerkopf ueber die Bilder 'indices' verfolgen, bis er das Bild verlaesst.
-    min_step: Mindestweg pro Bild (Anteil der Bildgroesse) - im Abschwung ist der Kopf schnell,
-    langsame Kandidaten sind Koerper/Arme. reach: wie weit hinter dem Schaftende der Kopf liegen darf
-    (im Abschwung ist der Schaft unscharf und nur teilweise erkannt).
-    Rueckgabe: [(bild, kopf_x, kopf_y, schaft_oben_x, schaft_oben_y), ...]
-    """
-    D = max(frames[0].shape)
-    ref_blur = cv2.GaussianBlur(frames[ref], (5, 5), 0)
-    pos, ang, out, miss = start_pos, None, [], 0
-    far = 0.0
-    for i in indices:
-        c = locate_club_head(frames[i], ref_blur, pos, max_jump * (1 + miss), ang, reach)
-        if c and out and math.hypot(c[0] - pos[0], c[1] - pos[1]) < min_step * D * (1 + miss):
-            c = None
-        if c:
-            # der Kopf entfernt sich (vom Ball aus gesehen) stetig - sonst ist es Koerper/Rauschen
-            dist = math.hypot(c[0] - start_pos[0], c[1] - start_pos[1])
-            if (not out and dist > 0.1 * D) or dist < far - 0.025 * D:
-                c = None
-            else:
-                far = max(far, dist)
-        if c:
-            pos, ang = (c[0], c[1]), c[2]
-            out.append((i, c[0], c[1], c[3], c[4]))
-            miss = 0
-        else:
-            miss += 1
-            if out and miss > max(2, int(0.03 * fps)):
-                break
-    return _smooth_path(out, 0.05 * D)
-
-
-def _head_vector(pts, D):
-    """
-    Kopfbahn beim Ausholen als ruhige Linie: Zittern beim Ansprechen weglassen (erst ab der ersten echten
-    Bewegung) und staerker glaetten. Start- und Endpunkt bleiben, wo sie sind.
-    """
-    if len(pts) < 3:
-        return pts
-    x0, y0 = pts[0][1], pts[0][2]
-    i = 1
-    while i < len(pts) and math.hypot(pts[i][1] - x0, pts[i][2] - y0) < 0.015 * D:
-        i += 1
-    pts = [pts[0]] + pts[max(1, i - 1):]
-    if len(pts) < 5:
-        return pts
-    out = [pts[0]]
-    for k in range(1, len(pts) - 1):
-        nb = pts[max(0, k - 2):k + 3]
-        out.append((pts[k][0], sum(q[1] for q in nb) / len(nb), sum(q[2] for q in nb) / len(nb)) + tuple(pts[k][3:]))
-    out.append(pts[-1])
-    return out
-
-
-def swing_paths(frames, fps, ball, impact, address, e, head):
-    """
-    Bahn des Schlaegerkopfs beim Ausholen und im Abschwung, soweit er im Bild ist.
-    Rueckgabe: Liste von {"label", "color", "points": [[t, kopf_x, kopf_y, schaft_x, schaft_y], ...]}
-    mit normierten Koordinaten (0..1) und t in Sekunden im Clip.
-    """
-    if address is None:
-        return []
-    ref = find_takeaway_quiet(e, address, impact, fps)
-    if ref is None:
-        return []
-    H, W = frames[0].shape
-    D = max(W, H)
-    out = []
-    bw = track_club_head(frames, ref, head, range(address, ref), fps, 0.06 * D)
-    # Treffmoment wird erst erkannt, wenn der Ball schon fliegt -> ein paar Bilder frueher anfangen
-    start = impact - max(1, int(round(0.0125 * fps)))
-    dw = track_club_head(frames, ref, ball, range(start, ref, -1), fps, 0.18 * D,
-                         min_step=0.012, reach=0.35)[::-1]
-    if dw and math.hypot(dw[-1][1] - ball[0], dw[-1][2] - ball[1]) < 0.1 * D:
-        last = dw[-1]
-        dw.append((min(impact, last[0] + 1), float(ball[0]), float(ball[1]), last[3], last[4]))
-    bw = _head_vector(bw, D)
-    # Ausholen: nur der Schlaegerkopf als Vektor (keine Schaftlinien), Abschwung mit Schaft-Faecher
-    for label, color, pts, shafts in (("Ausholen", "#29b6f6", bw, False), ("Abschwung", "#ff7043", dw, True)):
-        if len(pts) >= 3:
-            out.append({"label": label, "color": color, "shafts": shafts, "points": [
-                [round(i / fps, 4), round(x / W, 4), round(y / H, 4), round(sx / W, 4), round(sy / H, 4)]
-                for i, x, y, sx, sy in pts]})
-    return out
-
-
 def analyze(path, trigger_time=None):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
@@ -366,11 +202,6 @@ def analyze(path, trigger_time=None):
                                  "color": "#ff9800", "label": "Abschwung", "from": round(d / fps, 4),
                                  "extend": True, "auto": True, "frame_time": round(d / fps, 4)})
             break
-    # Schwungbahn: Schlaegerkopf beim Ausholen (ab Ansprechen) und im Abschwung (rueckwaerts vom Treffen)
-    try:
-        res["paths"] = swing_paths(frames, fps, ball, impact, address, e, head)
-    except Exception as ex:  # Bahn ist ein Zusatz - Analyse nicht daran scheitern lassen
-        log.warning("Schwungbahn nicht berechnet: %s", ex)
     # Schnittfenster fuer den Export: kurz vor dem Rueckschwung bis kurz nach dem Treffen
     start = (address / fps - 0.25) if address is not None else (impact / fps - 1.6)
     res["swing_start"] = round(max(0.0, start), 4)

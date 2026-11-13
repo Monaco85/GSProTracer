@@ -56,9 +56,8 @@ DEFAULT_CONFIG = {
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
     "export_brightness": 0.6,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
-    "export_paths": True,              # Schwungbahn (Ausholen/Abschwung) ins Export-Video zeichnen
-    "clip_orientation": "quer",        # quer = hochkant gespeicherte Clips verlustfrei quer stellen,
-                                       # quer_180 = dabei auf den Kopf drehen, "" = so lassen wie aufgenommen
+    "clip_orientation": "quer_180",    # Clips verlustfrei drehen: quer = Sensorbild, quer_180 = auf dem Kopf
+                                       # (Handy andersherum), "" = so lassen wie aufgenommen
     "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
     "export_threads": 2,               # CPU-Kerne fuer den Export (0 = alle)
 }
@@ -72,6 +71,12 @@ class Config:
         self.data = dict(DEFAULT_CONFIG)
         if os.path.exists(path):
             self.data.update(self._load(path))
+        self.data.pop("export_paths", None)            # Schwungbahn gibt es nicht mehr
+        # einmalig: "quer" lieferte bei diesem Aufbau ein Bild auf dem Kopf -> auf quer_180 umstellen
+        if self.data.get("orientation_version") != 2:
+            if self.data.get("clip_orientation") == "quer":
+                self.data["clip_orientation"] = "quer_180"
+            self.data["orientation_version"] = 2
         self.save()
 
     @staticmethod
@@ -107,7 +112,10 @@ class Config:
     def update(self, values):
         with self.lock:
             for k, v in values.items():
-                if k in DEFAULT_CONFIG and k.startswith(("clip_", "trigger_")):
+                if k == "clip_orientation":
+                    if v in ("quer", "quer_180", ""):
+                        self.data[k] = v
+                elif k in DEFAULT_CONFIG and k.startswith(("clip_", "trigger_")):
                     self.data[k] = float(v)
         self.save()
 
@@ -527,10 +535,52 @@ class TracerApp:
         return {"samples": len(diffs), "suggested_delay": round(median, 3),
                 "min": round(diffs[0], 3), "max": round(diffs[-1], 3)}
 
+    def reorient_all(self, enqueue=True):
+        """
+        Alle gespeicherten Clips gemaess clip_orientation drehen (verlustfrei). Gedrehte Schuesse werden neu
+        analysiert (Linien haengen von der Bildlage ab) und neu exportiert. Rueckgabe: Liste der IDs.
+        """
+        from exporter import fix_orientation
+        mode = self.cfg.data.get("clip_orientation", "quer_180")
+        changed = []
+        for s in self.store.list():
+            if not s["has_video"]:
+                continue
+            sid = s["id"]
+            try:
+                new = fix_orientation(self.exporter.ffmpeg, self.store.path(sid, "clip.mp4"), mode)
+            except Exception:
+                log.exception("Drehen %s fehlgeschlagen", sid)
+                continue
+            if not new:
+                continue
+            video = self.store.read_json(sid, "video.json") or {}
+            video["width"], video["height"] = new
+            self.store.write_json(sid, "video.json", video)
+            notes = self.store.read_json(sid, "notes.json") or {}
+            for k in ("analysis", "swing"):
+                notes.pop(k, None)
+            notes["lines"] = [l for l in notes.get("lines") or [] if not l.get("auto")]
+            self.store.write_json(sid, "notes.json", notes)
+            changed.append(sid)
+            if enqueue:
+                self.exporter.enqueue(sid)
+        if changed:
+            log.info("%d Clip(s) gedreht (%s) - Linien und Videos werden neu erstellt", len(changed), mode)
+        return changed
+
     def run(self):
         self.hub.start()
         self.proxy.start()
+        # vorhandene Clips richtig herum drehen (z.B. nach Aenderung von clip_orientation)
+        if self.exporter.ffmpeg:
+            changed = self.reorient_all(enqueue=False)
+        else:
+            changed = []
         self.exporter.start()
+        for sid in changed:
+            if (self.store.read_json(sid, "export.json") or {}).get("file"):
+                self.exporter.enqueue(sid)   # ohne Export werden sie von exporter.start() schon eingereiht
         handler = make_handler(self)
         httpd = QuietHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
         httpd.daemon_threads = True
@@ -735,7 +785,10 @@ def make_handler(app: TracerApp):
                     sid = app.handle_shot({}, test=True)
                     return self.send_json({"shot_id": sid})
                 if u.path == "/api/config":
+                    before = app.cfg.data.get("clip_orientation")
                     app.cfg.update(json.loads(self.read_body() or b"{}"))
+                    if app.cfg.data.get("clip_orientation") != before:
+                        threading.Thread(target=app.reorient_all, args=(True,), daemon=True).start()
                     return self.send_json(app.cfg.data)
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export$", u.path)
                 if m:
@@ -810,9 +863,9 @@ def make_handler(app: TracerApp):
             try:
                 from exporter import fix_orientation
                 new = fix_orientation(app.exporter.ffmpeg, app.store.path(sid, "clip.mp4"),
-                                      app.cfg.data.get("clip_orientation", "quer"))
+                                      app.cfg.data.get("clip_orientation", "quer_180"))
                 if new:
-                    log.info("Clip %s ins Querformat gedreht (%dx%d)", sid, new[0], new[1])
+                    log.info("Clip %s gedreht (%s, %dx%d)", sid, app.cfg.data.get("clip_orientation"), new[0], new[1])
                     meta["width"], meta["height"] = new
                     app.store.write_json(sid, "video.json", meta)
             except Exception:
