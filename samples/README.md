@@ -11,7 +11,7 @@ Ein echter Schlag zum Testen und Weiterentwickeln, ohne Handy, R10 oder GSPro.
 | `video.json` | Metadaten vom Handy (fps, Größe, Zeitpunkt des R10-Triggers im Clip) |
 | `reference.json` | **Von Hand gesetzte Referenz:** Treffmoment 3,232 s, Schaft beim Ansprechen (Bild 1,50 s) und im Abschwung (Bild 3,215 s) |
 
-**`export_beispiel_W3_135kmh.mp4`**: So sieht das fertige Export-Video aus (Zeitlupe 1/8, Daten in km/h, Linien), ca. 0,5 MB.
+**`export_beispiel_W3_135kmh.mp4`**: Export-Video vom 12.11. (Zeitlupe 1/8, Daten in km/h, Linien; noch ohne Aufhellung und Schwungbahn, stark komprimiert).
 
 ## Benutzen
 

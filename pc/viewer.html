@@ -133,6 +133,9 @@ async function poll() {
   }
   try {
     cfg = st.config;
+    // gleiche Aufhellung wie im Export-Video (export_brightness)
+    const br = +(cfg.export_brightness || 0);
+    vid.style.filter = br > 0 ? `brightness(${(1 + 0.55 * br).toFixed(2)}) contrast(1.05)` : '';
     const p = $('#stProxy');
     p.textContent = st.proxy_connected ? 'Connector ✓' : 'Connector nicht verbunden';
     p.className = 'pill ' + (st.proxy_connected ? 'ok' : 'warn');
@@ -302,9 +305,30 @@ const LINE_TYPES = {
   help: { label: '', color: '#ffeb3b', fromZero: true },
 };
 function savedLines() { return (cur && cur.notes && cur.notes.lines) || []; }
+// Schwungbahn aus der automatischen Analyse: Schlaegerkopf beim Ausholen / im Abschwung, waechst mit der Zeit
+function drawPaths(W, H, t) {
+  const paths = (cur && cur.notes && cur.notes.analysis && cur.notes.analysis.paths) || [];
+  for (const p of paths) {
+    const pts = (p.points || []).filter(q => q[0] <= t + 1e-6);
+    if (!pts.length) continue;
+    const step = Math.max(1, Math.floor(p.points.length / 14));
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.strokeStyle = p.color;
+    for (let k = 0; k < pts.length; k += step) {
+      ctx.beginPath(); ctx.moveTo(pts[k][1] * W, pts[k][2] * H); ctx.lineTo(pts[k][3] * W, pts[k][4] * H); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (const [lw, col] of [[6, 'rgba(0,0,0,.6)'], [3, p.color]]) {
+      ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath();
+      pts.forEach((q, i) => i ? ctx.lineTo(q[1] * W, q[2] * H) : ctx.moveTo(q[1] * W, q[2] * H)); ctx.stroke();
+    }
+    const l = pts[pts.length - 1];
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(l[1] * W, l[2] * H, 5, 0, 7); ctx.fill();
+  }
+}
 function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
   const W = cv.width, H = cv.height, t = vid.currentTime || 0;
+  if (cfg.export_paths !== false) drawPaths(W, H, t);
   const all = savedLines().filter(l => t + 1e-6 >= (l.from || 0));
   if (drag) all.push(drag);
   for (const l of all) {
@@ -326,6 +350,8 @@ function draw() {
   }
 }
 vid.addEventListener('timeupdate', draw); vid.addEventListener('seeked', draw);
+// beim Abspielen fluessig nachzeichnen (timeupdate kommt nur ~4x pro Sekunde)
+vid.addEventListener('play', () => { const f = () => { draw(); if (!vid.paused && !vid.ended) requestAnimationFrame(f); }; f(); });
 const rel = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
 cv.onmousedown = e => {
   if (!cur) return; const p = rel(e); const ty = LINE_TYPES[$('#lineType').value];

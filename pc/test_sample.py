@@ -55,6 +55,19 @@ def main():
             failed += not ok
             print(f"  {rl['label']:<11} auto {angle(al, w, h):.1f}°  Referenz {angle(rl, w, h):.1f}°  "
                   f"Abweichung {da:.1f}°  {'OK' if ok else 'ZU GROSS'}")
+        # Schwungbahn: beide Phasen erkannt, Abschwung endet am Ball
+        paths = {p["label"]: p["points"] for p in res.get("paths", [])}
+        for lab in ("Ausholen", "Abschwung"):
+            pts = paths.get(lab) or []
+            ok = len(pts) >= 4
+            failed += not ok
+            print(f"  Bahn {lab:<9} {len(pts)} Punkte  {'OK' if ok else 'FEHLT'}")
+        if paths.get("Abschwung"):
+            end = paths["Abschwung"][-1]
+            d = math.hypot((end[1] - res["ball"][0]) * w, (end[2] - res["ball"][1]) * h)
+            ok = d < 0.05 * max(w, h)
+            failed += not ok
+            print(f"  Abschwung endet {d:.0f} px vom Ball  {'OK' if ok else 'ZU WEIT'}")
     print("Ergebnis:", "alles OK" if not failed else f"{failed} Abweichung(en)")
     return 1 if failed else 0
 

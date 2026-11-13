@@ -2,7 +2,8 @@
 
 Schwungvideos mit **240 fps** vom Handy (Poco X3) – automatisch zu jedem Schlag, den der **Garmin R10** an
 **GSPro** meldet. Am PC: Zeitlupen-Analyse im Browser, fertige Videos mit eingeblendeten Schlagdaten in **km/h**
-und automatisch eingezeichneten **Schaftlinien** (Ansprechen / Abschwung).
+und automatisch eingezeichneten **Schaftlinien** (Ansprechen / Abschwung) sowie der **Schwungbahn**
+(Ausholen / Abschwung).
 
 ```
 Garmin R10 ──BT──► MLM2PRO-GSPro-Connector ──► Tracer-Proxy :9211 ──► GSPro OpenAPI :921
@@ -41,7 +42,7 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
 **Handy-App (Android, getestet auf Poco X3 NFC / M2007J20CG)**
 - Dauerhafte Aufnahme im Highspeed-Modus: **720p mit 240 fps** (alternativ 1080p mit 120 fps)
 - Clip pro Schlag, ausgelöst vom PC, automatischer Upload; nicht hochgeladene Clips werden nachgeschickt
-- **Hochkant** (Standard) oder quer, Video-Drehung für kopfüber montierte Handys
+- **Quer** (Standard) oder hochkant, Video-Drehung für kopfüber montierte Handys
 - Belichtung/Fokus sperren, Display dimmen (weniger Wärme), Akku-Temperatur-Anzeige
 - Live-Bild (~5 fps) für den PC zum Ausrichten der Kamera
 - **In-App-Update** aus dem GitHub-Release `cam-latest`
@@ -51,8 +52,9 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
 - **Analyse-Seite** <http://localhost:8090>: Zeitlupe bis 1/16, Bild für Bild, Ball-/Schlägerdaten in km/h,
   Smash, Face-to-Path, Notizen, Durchschnitt pro Schläger, CSV-Export (Excel)
 - **Kamera ausrichten** <http://localhost:8090/live>: Live-Bild mit Raster und Markierungen
-- **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, auf den Schwung zugeschnitten (~0,5 MB)
-- **Automatische Analyse** (OpenCV): Treffmoment, Ansprechen, **Schaftlinien** beim Ansprechen und im Abschwung
+- **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, aufgehellt, ca. 7 MB
+- **Automatische Analyse** (OpenCV): Treffmoment, Ansprechen, **Schaftlinien** beim Ansprechen und im Abschwung,
+  **Schwungbahn** des Schlägerkopfs beim Ausholen und im Abschwung
   inkl. Winkel; Linien lassen sich auch von Hand zeichnen
 
 ---
@@ -113,7 +115,7 @@ PC und Handy müssen im **selben WLAN** sein.
 |---|---|
 | Verbinden | Verbindung zur eingetragenen PC-IP |
 | Testclip | 3-s-Clip ohne R10 (zum Testen/Ausrichten) |
-| Format: hochkant / quer | Ausrichtung der Aufnahme |
+| Format: quer / hochkant | Ausrichtung der Aufnahme (Standard: quer) |
 | Modus: 240 fps / 720p ↔ 120 fps / 1080p | 1080p kann einen größeren Bildausschnitt haben |
 | Weitwinkel | nur sichtbar, wenn das Handy Zoom < 1× für Fremd-Apps anbietet |
 | Video drehen | Zusatzdrehung, wenn das Handy kopfüber/seitlich montiert ist (sonst 0°) |
@@ -157,18 +159,25 @@ dem Treffmoment. Gilt sofort, ohne Neustart.
 
 Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<Schläger>_<Ballspeed>kmh.mp4`:
 
-- **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (hochkant/quer)
+- **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (quer/hochkant)
+- **Aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
 - **Datenpanel:** Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
   verlängert bis zum Bildrand (Schwungebene)
-- **Zugeschnitten** auf Ansprechen − 0,25 s bis Treffmoment + 0,6 s → ca. **0,5–1 MB** pro Schlag
+- **Schwungbahn:** hellblau = Ausholen, orange-rot = Abschwung. Die Bahn des Schlägerkopfs wächst beim Abspielen
+  mit, dazu dünne Schaftlinien als Fächer. Gezeigt wird der Teil, in dem der Schläger im Bild ist.
+- **Ganzer Clip** in guter Qualität (CRF 20) → ca. **7 MB** pro Schlag. Kleiner: `export_trim: true` und/oder
+  `export_crf: 28` (ca. 0,5 MB)
 
 **So funktioniert die automatische Analyse** (`pc\swing_analysis.py`):
 1. *Treffmoment:* Der Ball ist der hellste Punkt unten im Bild; beim Treffen verschwindet er schlagartig.
 2. *Ansprechen:* letztes ruhiges Bild, bevor sich der Schläger um den Ball bewegt.
 3. *Schaft:* Bild mit Schläger am Ball minus Bild ohne Schläger → Kanten → Hough-Linien → die längste Linie,
    die zum Schlägerkopf zeigt.
+4. *Schwungbahn:* Schlägerkopf Bild für Bild verfolgen (Schaft per Hough-Linie, Kopf = kompakter Fleck am
+   Schaftende), beim Ausholen vorwärts ab dem Ansprechen, im Abschwung rückwärts ab dem Treffmoment, bis er das
+   Bild verlässt.
 
 Handgezeichnete Linien haben Vorrang. Ohne Ball im Bild oder vor sehr unruhigem Hintergrund kann die Erkennung
 danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
@@ -186,12 +195,16 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `gspro_host` / `gspro_port` | 127.0.0.1 / 921 | GSPro OpenAPI |
 | `phone_control_port` | 9300 | Steuerverbindung zum Handy |
 | `http_port` | 8090 | Analyse-Seite und Upload |
-| `clip_pre_seconds` / `clip_post_seconds` | 4,0 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
+| `clip_pre_seconds` / `clip_post_seconds` | 3,5 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
 | `trigger_delay_seconds` | 0 | R10-Verzögerung (per Kalibrierung) |
 | `shots_dir` / `exports_dir` | shots / exports | Speicherorte |
 | `export_playback_fps` | 30 | 30 = Zeitlupe 1/8, 60 = 1/4, 240 = Echtzeit |
-| `export_crf` | 28 | Kompression: 23 = sehr gut (größer), 30 = klein |
-| `export_trim` | true | Export nur vom Schwung |
+| `export_crf` | 20 | Qualität: 20 ≈ 7 MB, 23 ≈ 3–4 MB, 28 ≈ 0,5 MB (niedriger = besser/größer) |
+| `export_preset` | medium | x264-Preset (`slow` = etwas kleiner, dauert länger) |
+| `export_brightness` | 0,6 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
+| `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
+| `export_paths` | true | Schwungbahn (Ausholen/Abschwung) einzeichnen |
+| `export_trim` | false | true = Export nur vom Schwung (Ansprechen − 0,25 s bis Treffen + 0,6 s) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
 | `ffmpeg_path` | "" | leer = automatisch suchen |
 
@@ -203,7 +216,7 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 ## 6. Kamera-Aufbau, Licht, Weitwinkel
 
 - **Position:** hinter dem Spieler auf der Verlängerung der Ziellinie (Down-the-Line), Hüft- bis Handhöhe,
-  **hochkant**. Ball und Hände möglichst in die Bildmitte.
+  **quer**. Ball und Hände möglichst in die Bildmitte.
 - **Abstand** für den ganzen Schwung (hochkant, Poco X3 Hauptkamera ≈ 26 mm):
 
   | | Breite / Höhe bei 1,5 m | Abstand für ganzen Schwung |

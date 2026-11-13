@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
     "gspro_port": 921,
     "phone_control_port": 9300,
     "http_port": 8090,
-    "clip_pre_seconds": 4.0,
+    "clip_pre_seconds": 3.5,           # Aufnahme beginnt 3,5 s vor dem R10-Trigger
     "clip_post_seconds": 0.5,
     "trigger_delay_seconds": 0.0,
     "shots_dir": "shots",
@@ -51,8 +51,12 @@ DEFAULT_CONFIG = {
     "export_playback_fps": 30,         # 240 fps -> 30 fps = Zeitlupe 1/8, jedes Bild sichtbar
     "ffmpeg_path": "",                 # leer = automatisch suchen
     "auto_analysis": True,             # Treffmoment + Schaftlinien automatisch erkennen (OpenCV)
-    "export_trim": True,               # Export nur vom Ansprechen bis kurz nach dem Treffmoment
-    "export_crf": 28,                  # Kompression (hoeher = kleiner, 23 = sehr gut, 30 = klein)
+    "export_trim": False,              # True = Export nur vom Ansprechen bis kurz nach dem Treffmoment
+    "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
+    "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
+    "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
+    "export_brightness": 0.6,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
+    "export_paths": True,              # Schwungbahn (Ausholen/Abschwung) ins Export-Video zeichnen
 }
 
 

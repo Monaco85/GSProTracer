@@ -4,7 +4,7 @@
   "gspro_port": 921,
   "phone_control_port": 9300,
   "http_port": 8090,
-  "clip_pre_seconds": 4.0,
+  "clip_pre_seconds": 3.5,
   "clip_post_seconds": 0.5,
   "trigger_delay_seconds": 0.0,
   "shots_dir": "shots",
@@ -12,6 +12,10 @@
   "export_playback_fps": 30,
   "ffmpeg_path": "",
   "auto_analysis": true,
-  "export_trim": true,
-  "export_crf": 28
+  "export_trim": false,
+  "export_crf": 20,
+  "export_preset": "medium",
+  "export_brightness": 0.6,
+  "export_paths": true,
+  "export_denoise": 3
 }

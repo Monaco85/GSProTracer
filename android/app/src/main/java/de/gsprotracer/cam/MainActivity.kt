@@ -60,6 +60,11 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Einmalig nach dem Update: zurueck auf Querformat (240 fps) - danach gilt wieder die eigene Wahl
+        if (!prefs.getBoolean("landscape_v2", false)) {
+            prefs.edit().putBoolean("portrait", false).putInt("maxFps", HighSpeedRecorder.TARGET_FPS)
+                .putBoolean("landscape_v2", true).apply()
+        }
         applyOrientation()
         clipDir = File(getExternalFilesDir(null) ?: filesDir, "clips").apply { mkdirs() }
 
@@ -166,9 +171,9 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
     }
 
     private lateinit var btnOrient: Button
-    private fun isPortrait() = prefs.getBoolean("portrait", true)
+    private fun isPortrait() = prefs.getBoolean("portrait", false)
 
-    /** Hochkant (Standard) oder quer. Das Video folgt automatisch der Bildschirm-Ausrichtung. */
+    /** Quer (Standard) oder hochkant. Das Video folgt automatisch der Bildschirm-Ausrichtung. */
     private fun applyOrientation() {
         requestedOrientation = if (isPortrait()) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE

@@ -231,6 +231,117 @@ class Exporter:
                 f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={lx}:y={ly}:enable='gte(t,{start:.4f})'")
         return inputs, filters
 
+    def _path_overlay(self, paths, w, h, shot_dir, fs, files, font_bold, t0=0.0, total=60.0):
+        """
+        Schwungbahn (Schlaegerkopf beim Ausholen / im Abschwung) als wachsende Linie.
+        Erzeugt pro Bahnpunkt ein transparentes PNG mit dem bisherigen Verlauf und eine
+        FFmpeg-concat-Liste, die jedes Bild bis zum naechsten Punkt zeigt.
+        Rueckgabe: (Name der concat-Liste oder None, [drawtext-Filter fuer die Legende])
+        """
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return None, []
+        events = []                     # (zeit, pfad-index, punkt-index)
+        for pi, p in enumerate(paths):
+            for k, pt in enumerate(p.get("points") or []):
+                events.append((float(pt[0]), pi, k))
+        if not events:
+            return None, []
+        events.sort()
+        D = max(w, h)
+        thick = max(3, int(round(D * 0.005)))
+        thin = max(1, int(round(D * 0.0018)))
+        bgr = []
+        for p in paths:
+            col = str(p.get("color", "#29b6f6")).lstrip("#")
+            bgr.append((int(col[4:6], 16), int(col[2:4], 16), int(col[0:2], 16)))
+
+        def render(upto):
+            """upto: {pfad-index: anzahl sichtbarer punkte}"""
+            shafts = np.zeros((h, w, 3), np.uint8)
+            shafts_a = np.zeros((h, w), np.uint8)
+            img = np.zeros((h, w, 3), np.uint8)
+            alpha = np.zeros((h, w), np.uint8)
+            for pi, n in upto.items():
+                pts = paths[pi]["points"][:n]
+                step = max(1, len(paths[pi]["points"]) // 14)     # etwa 14 Schaftlinien pro Bahn
+                for k in range(0, len(pts), step):
+                    _, hx, hy, sx, sy = pts[k][:5]
+                    a, b = (int(hx * w), int(hy * h)), (int(sx * w), int(sy * h))
+                    cv2.line(shafts, a, b, bgr[pi], thin, cv2.LINE_AA)
+                    cv2.line(shafts_a, a, b, 150, thin, cv2.LINE_AA)
+                poly = np.array([[int(q[1] * w), int(q[2] * h)] for q in pts], np.int32).reshape(-1, 1, 2)
+                if len(pts) >= 2:
+                    cv2.polylines(img, [poly], False, (0, 0, 0), thick + 4, cv2.LINE_AA)
+                    cv2.polylines(alpha, [poly], False, 150, thick + 4, cv2.LINE_AA)
+                    cv2.polylines(img, [poly], False, bgr[pi], thick, cv2.LINE_AA)
+                    cv2.polylines(alpha, [poly], False, 255, thick, cv2.LINE_AA)
+                hx, hy = pts[-1][1], pts[-1][2]
+                cv2.circle(img, (int(hx * w), int(hy * h)), thick + 2, bgr[pi], -1, cv2.LINE_AA)
+                cv2.circle(alpha, (int(hx * w), int(hy * h)), thick + 2, 255, -1, cv2.LINE_AA)
+            m = alpha > 0
+            shafts[m] = img[m]
+            shafts_a = np.maximum(shafts_a, alpha)
+            return np.dstack([shafts, shafts_a])
+
+        lst, upto, last_t = [], {}, None
+        empty = "_ov_path_0000.png"
+        cv2.imwrite(os.path.join(shot_dir, empty), np.zeros((h, w, 4), np.uint8))
+        files[empty] = ""
+        cur_file, cur_start = empty, 0.0
+        for n, (t, pi, k) in enumerate(events, start=1):
+            upto[pi] = k + 1
+            ts = max(0.0, t - t0)
+            name = f"_ov_path_{n:04d}.png"
+            cv2.imwrite(os.path.join(shot_dir, name), render(upto))
+            files[name] = ""
+            if ts > cur_start:
+                lst.append((cur_file, ts - cur_start))
+                cur_start = ts
+            cur_file = name
+        lst.append((cur_file, max(0.1, total - cur_start)))   # letzter Stand bleibt bis zum Ende stehen
+        lst.append((cur_file, None))
+        concat = "_ov_paths.txt"
+        with open(os.path.join(shot_dir, concat), "w", encoding="utf-8", newline="\n") as f:
+            f.write("ffconcat version 1.0\n")
+            for name, dur in lst:
+                f.write(f"file {name}\n")
+                if dur is not None:
+                    f.write(f"duration {dur:.5f}\n")
+        files[concat] = ""
+
+        # Legende oben links: erscheint, sobald die jeweilige Bahn beginnt
+        filters = []
+        for pi, p in enumerate(paths):
+            if not p.get("points"):
+                continue
+            tf = f"_ov_plbl{pi}.txt"
+            with open(os.path.join(shot_dir, tf), "w", encoding="utf-8", newline="\n") as f:
+                f.write(p.get("label", ""))
+            files[tf] = ""
+            start = max(0.0, float(p["points"][0][0]) - t0)
+            col = str(p.get("color", "#29b6f6")).lstrip("#")
+            filters.append(
+                f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
+                f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={int(fs * 0.8)}"
+                f":y={int(fs * 0.8 + pi * fs * 2.0)}:enable='gte(t,{start:.4f})'")
+        return concat, filters
+
+    def _brighten_filter(self):
+        """Aufhellen per Tonwertkurve: Schatten/Mitten heller, Schwarz bleibt schwarz, Lichter bleiben."""
+        s = float(self.cfg.data.get("export_brightness", 0.6) or 0)
+        if s <= 0:
+            return None
+        s = min(s, 1.5)
+        p1 = min(0.9, 0.25 + 0.33 * s)
+        p2 = min(0.97, 0.6 + 0.33 * s)
+        dn = float(self.cfg.data.get("export_denoise", 3) or 0)
+        # leichtes Entrauschen vorher: aufgehelltes Sensorrauschen kostet sonst viel Dateigroesse
+        pre = f"hqdn3d={dn:g}:{dn * 0.75:g}:{dn * 1.5:g}:{dn * 1.1:g}," if dn > 0 else ""
+        return f"{pre}curves=all='0/0 0.25/{p1:.3f} 0.6/{p2:.3f} 1/1'"
+
     def export(self, sid):
         shot_dir = self.store.path(sid)
         clip = os.path.join(shot_dir, "clip.mp4")
@@ -281,15 +392,20 @@ class Exporter:
 
         # Automatische Analyse (Treffmoment, Ansprechen, Schaftlinien) - einmal pro Clip
         notes = self.store.read_json(sid, "notes.json") or {}
-        if self.cfg.data.get("auto_analysis", True) and "analysis" not in notes:
+        ana = notes.get("analysis")
+        if self.cfg.data.get("auto_analysis", True) and (ana is None or ("paths" not in ana and "error" not in ana)):
             notes = self._auto_analyze(sid, clip, notes, video)
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         t1 = float(sw["end"]) if self.cfg.data.get("export_trim", True) and sw.get("end") else None
         # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
         line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)
+        # Schwungbahn (Ausholen / Abschwung) aus der automatischen Analyse
+        paths = (notes.get("analysis") or {}).get("paths") or [] if self.cfg.data.get("export_paths", True) else []
+        total = (t1 or float(video.get("duration") or 30.0)) - t0 + 1.0
+        path_list, path_filters = self._path_overlay(paths, w, h, shot_dir, fs, files, fb, t0, total)
 
-        vf = ",".join(line_filters + [
+        vf = ",".join(line_filters + path_filters + [
             f"drawbox=x=0:y=ih-{panel_h}:w=iw:h={panel_h}:color=black@0.62:t=fill",
             dt("_ov_head.txt", fb, hs, x1, top, "0xFFEB3B"),
             dt("_ov_l1.txt", fr, fs, x1, body, "0xB0BEC5"),
@@ -309,18 +425,26 @@ class Exporter:
         cmd += ["-i", "clip.mp4"]
         for png in line_inputs:
             cmd += ["-loop", "1", "-i", png]
-        if line_inputs:
-            # [0:v] -> Linien-Overlays -> Panel/Texte (Overlay braucht filter_complex)
-            chain, cur = [], "[0:v]"
-            for i, (png, start) in enumerate(line_inputs.items(), start=1):
-                chain.append(f"{cur}[{i}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[l{i}]")
-                cur = f"[l{i}]"
-            chain.append(f"{cur}{vf}[out]")
-            cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
-        else:
-            cmd += ["-vf", vf]
-        crf = str(int(self.cfg.data.get("export_crf", 28)))
-        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", "slow", "-crf", crf,
+        if path_list:
+            cmd += ["-f", "concat", "-safe", "0", "-i", path_list]
+        # [0:v] -> aufhellen -> Schwungbahn -> Linien -> Panel/Texte (Overlay braucht filter_complex)
+        chain, cur = [], "[0:v]"
+        bright = self._brighten_filter()
+        if bright:
+            chain.append(f"{cur}{bright}[br]")
+            cur = "[br]"
+        if path_list:
+            pi = len(line_inputs) + 1
+            chain.append(f"{cur}[{pi}:v]overlay=0:0:shortest=1[pa]")
+            cur = "[pa]"
+        for i, (png, start) in enumerate(line_inputs.items(), start=1):
+            chain.append(f"{cur}[{i}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[l{i}]")
+            cur = f"[l{i}]"
+        chain.append(f"{cur}{vf}[out]")
+        cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
+        crf = str(int(self.cfg.data.get("export_crf", 18)))
+        preset = str(self.cfg.data.get("export_preset", "medium"))
+        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", preset, "-crf", crf,
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         res = subprocess.run(cmd, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)
