@@ -71,9 +71,34 @@ class Config:
         self.lock = threading.Lock()
         self.data = dict(DEFAULT_CONFIG)
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                self.data.update(json.load(f))
+            self.data.update(self._load(path))
         self.save()
+
+    @staticmethod
+    def _load(path):
+        """
+        config.json lesen. Typische Tippfehler beim Bearbeiten (fehlende/ueberzaehlige Kommas) werden
+        repariert; ist die Datei gar nicht lesbar, wird sie gesichert und mit Standardwerten gestartet.
+        """
+        with open(path, "r", encoding="utf-8-sig") as f:
+            text = f.read()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            err = e
+        fixed = re.sub(r'(["\d\]}]|true|false|null)(\s*\n\s*")', r"\1,\2", text)   # fehlendes Komma am Zeilenende
+        fixed = re.sub(r",(\s*[}\]])", r"\1", fixed)                               # Komma vor } zu viel
+        try:
+            data = json.loads(fixed)
+            log.warning("config.json hatte einen Tippfehler (%s) - automatisch repariert", err)
+            return data
+        except json.JSONDecodeError:
+            pass
+        backup = path + ".defekt.txt"
+        shutil.copyfile(path, backup)
+        log.error("config.json ist fehlerhaft (%s) - Standardwerte werden benutzt, alte Datei gesichert als %s",
+                  err, backup)
+        return {}
 
     def __getitem__(self, key):
         with self.lock:
