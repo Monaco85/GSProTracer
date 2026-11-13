@@ -162,12 +162,12 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
 
 - **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (quer/hochkant)
 - **Aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
-- **Datenpanel:** Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
+- **Datenpanel** (quer: kompakt oben links, damit Ball und Schwungbahn frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
   verlängert bis zum Bildrand (Schwungebene)
-- **Schwungbahn:** hellblau = Ausholen, orange-rot = Abschwung. Die Bahn des Schlägerkopfs wächst beim Abspielen
-  mit, dazu dünne Schaftlinien als Fächer. Gezeigt wird der Teil, in dem der Schläger im Bild ist.
+- **Schwungbahn:** hellblau = Ausholen (nur der Schlägerkopf als Vektor mit Pfeilspitze), orange-rot = Abschwung
+  (Kopfbahn plus dünne Schaftlinien als Fächer). Die Bahn wächst beim Abspielen mit. Gezeigt wird der Teil, in dem der Schläger im Bild ist.
 - **Ganzer Clip** in guter Qualität (CRF 20) → ca. **7 MB** pro Schlag. Kleiner: `export_trim: true` und/oder
   `export_crf: 28` (ca. 0,5 MB)
 
@@ -196,7 +196,7 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 | `gspro_host` / `gspro_port` | 127.0.0.1 / 921 | GSPro OpenAPI |
 | `phone_control_port` | 9300 | Steuerverbindung zum Handy |
 | `http_port` | 8090 | Analyse-Seite und Upload |
-| `clip_pre_seconds` / `clip_post_seconds` | 3,5 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
+| `clip_pre_seconds` / `clip_post_seconds` | 3,6 / 0,5 | Clip vor/nach dem (geschätzten) Treffmoment |
 | `trigger_delay_seconds` | 0 | R10-Verzögerung (per Kalibrierung) |
 | `shots_dir` / `exports_dir` | shots / exports | Speicherorte |
 | `export_playback_fps` | 30 | 30 = Zeitlupe 1/8, 60 = 1/4, 240 = Echtzeit |
@@ -244,6 +244,7 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 | „Connector nicht verbunden“ | Port in der Connector-`settings.json` auf 9211; Reihenfolge GSPro → Tracer → Connector |
 | Connector: „GSPro Send Error“, im Log „GSPro antwortet nicht“ bzw. „GSPro->Connector 0 Nachrichten“ | GSPro API Connect hängt noch an einer alten Verbindung: in GSPro API Connect schließen und neu starten, dann im Connector „Connect“. Reihenfolge: GSPro + API Connect → Tracer → Connector |
 | App: „PC nicht erreichbar“ | richtige PC-IP? gleiches WLAN? Firewall für Python (private Netzwerke) erlaubt? |
+| Im Log „Clip ist HOCHKANT“ | In der App „Format: quer“ wählen bzw. App updaten; Querformat ist Standard |
 | Kein Video zum Schuss | App im Vordergrund? Handy verbunden (Analyse-Seite oben)? |
 | Treffmoment nicht im Clip | Kalibrierung durchführen (Einstellungen) |
 | Keine Linien im Export | OpenCV installiert? Ball im Bild? Sonst von Hand zeichnen |

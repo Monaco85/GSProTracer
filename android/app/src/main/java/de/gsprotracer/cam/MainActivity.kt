@@ -489,5 +489,6 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             .put("temp", batteryTemp() ?: 0.0)
             .put("pending", link.pendingCount())
             .put("camera_info", recorder.cameraInfo)
+            .put("format", if (isPortrait()) "hochkant" else "quer")
     }
 }

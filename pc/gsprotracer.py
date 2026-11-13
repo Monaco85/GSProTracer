@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
     "gspro_port": 921,
     "phone_control_port": 9300,
     "http_port": 8090,
-    "clip_pre_seconds": 3.5,           # Aufnahme beginnt 3,5 s vor dem R10-Trigger
+    "clip_pre_seconds": 3.6,           # Aufnahme beginnt 3,6 s vor dem R10-Trigger
     "clip_post_seconds": 0.5,
     "trigger_delay_seconds": 0.0,
     "shots_dir": "shots",
@@ -779,7 +779,11 @@ def make_handler(app: TracerApp):
             if not app.store.read_json(sid, "shot.json"):
                 app.store.write_json(sid, "shot.json", {"received_at": meta["uploaded_at"],
                                                         "test": True, "payload": {}})
-            log.info("Video empfangen: %s (%.1f MB, %s fps)", sid, length / 1e6, meta["fps"])
+            fmt = "hochkant" if meta["height"] > meta["width"] else "quer"
+            log.info("Video empfangen: %s (%.1f MB, %s fps, %dx%d %s)", sid, length / 1e6, meta["fps"],
+                     meta["width"], meta["height"], fmt)
+            if fmt == "hochkant":
+                log.warning("Clip ist HOCHKANT - in der App 'Format: quer' waehlen (oder App updaten)")
             app.exporter.enqueue(sid)
             self.send_json({"ok": True})
 

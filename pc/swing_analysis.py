@@ -261,6 +261,28 @@ def track_club_head(frames, ref, start_pos, indices, fps, max_jump, min_step=0.0
     return _smooth_path(out, 0.05 * D)
 
 
+def _head_vector(pts, D):
+    """
+    Kopfbahn beim Ausholen als ruhige Linie: Zittern beim Ansprechen weglassen (erst ab der ersten echten
+    Bewegung) und staerker glaetten. Start- und Endpunkt bleiben, wo sie sind.
+    """
+    if len(pts) < 3:
+        return pts
+    x0, y0 = pts[0][1], pts[0][2]
+    i = 1
+    while i < len(pts) and math.hypot(pts[i][1] - x0, pts[i][2] - y0) < 0.015 * D:
+        i += 1
+    pts = [pts[0]] + pts[max(1, i - 1):]
+    if len(pts) < 5:
+        return pts
+    out = [pts[0]]
+    for k in range(1, len(pts) - 1):
+        nb = pts[max(0, k - 2):k + 3]
+        out.append((pts[k][0], sum(q[1] for q in nb) / len(nb), sum(q[2] for q in nb) / len(nb)) + tuple(pts[k][3:]))
+    out.append(pts[-1])
+    return out
+
+
 def swing_paths(frames, fps, ball, impact, address, e, head):
     """
     Bahn des Schlaegerkopfs beim Ausholen und im Abschwung, soweit er im Bild ist.
@@ -283,9 +305,11 @@ def swing_paths(frames, fps, ball, impact, address, e, head):
     if dw and math.hypot(dw[-1][1] - ball[0], dw[-1][2] - ball[1]) < 0.1 * D:
         last = dw[-1]
         dw.append((min(impact, last[0] + 1), float(ball[0]), float(ball[1]), last[3], last[4]))
-    for label, color, pts in (("Ausholen", "#29b6f6", bw), ("Abschwung", "#ff7043", dw)):
+    bw = _head_vector(bw, D)
+    # Ausholen: nur der Schlaegerkopf als Vektor (keine Schaftlinien), Abschwung mit Schaft-Faecher
+    for label, color, pts, shafts in (("Ausholen", "#29b6f6", bw, False), ("Abschwung", "#ff7043", dw, True)):
         if len(pts) >= 3:
-            out.append({"label": label, "color": color, "points": [
+            out.append({"label": label, "color": color, "shafts": shafts, "points": [
                 [round(i / fps, 4), round(x / W, 4), round(y / H, 4), round(sx / W, 4), round(sy / H, 4)]
                 for i, x, y, sx, sy in pts]})
     return out

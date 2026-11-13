@@ -321,7 +321,7 @@ function drawPaths(W, H, t) {
     if (!pts.length) continue;
     const step = Math.max(1, Math.floor(p.points.length / 14));
     ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.strokeStyle = p.color;
-    for (let k = 0; k < pts.length; k += step) {
+    for (let k = 0; p.shafts !== false && k < pts.length; k += step) {
       ctx.beginPath(); ctx.moveTo(pts[k][1] * W, pts[k][2] * H); ctx.lineTo(pts[k][3] * W, pts[k][4] * H); ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -329,8 +329,17 @@ function drawPaths(W, H, t) {
       ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath();
       pts.forEach((q, i) => i ? ctx.lineTo(q[1] * W, q[2] * H) : ctx.moveTo(q[1] * W, q[2] * H)); ctx.stroke();
     }
-    const l = pts[pts.length - 1];
-    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(l[1] * W, l[2] * H, 5, 0, 7); ctx.fill();
+    // Pfeilspitze in Bewegungsrichtung des Schlaegerkopfs
+    const l = pts[pts.length - 1], hx = l[1] * W, hy = l[2] * H;
+    const b = pts.slice(0, -1).reverse().find(q => Math.hypot(q[1] * W - hx, q[2] * H - hy) > 8);
+    ctx.fillStyle = p.color;
+    if (b) {
+      const dx = hx - b[1] * W, dy = hy - b[2] * H, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, sz = 13;
+      ctx.beginPath(); ctx.moveTo(hx + ux * 3, hy + uy * 3);
+      ctx.lineTo(hx - ux * sz - uy * sz * 0.6, hy - uy * sz + ux * sz * 0.6);
+      ctx.lineTo(hx - ux * sz + uy * sz * 0.6, hy - uy * sz - ux * sz * 0.6); ctx.closePath();
+      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.stroke(); ctx.fill();
+    } else { ctx.beginPath(); ctx.arc(hx, hy, 5, 0, 7); ctx.fill(); }
   }
 }
 function draw() {

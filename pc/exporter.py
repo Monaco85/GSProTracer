@@ -52,6 +52,34 @@ def find_ffmpeg(configured=""):
     return None
 
 
+def display_size(ffmpeg, clip):
+    """
+    Tatsaechliche Bildgroesse so, wie FFmpeg/OpenCV das Video anzeigen (inkl. Drehung aus der MP4-Datei).
+    Rueckgabe (breite, hoehe) oder None.
+    """
+    probe = os.path.join(os.path.dirname(ffmpeg), "ffprobe" + (".exe" if ffmpeg.lower().endswith(".exe") else ""))
+    if not os.path.isfile(probe):
+        probe = shutil.which("ffprobe")
+    if not probe:
+        return None
+    try:
+        res = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=width,height:stream_side_data=rotation:stream_tags=rotate",
+                              "-of", "json", clip], capture_output=True, text=True, timeout=30,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        st = json.loads(res.stdout)["streams"][0]
+        w, h = int(st["width"]), int(st["height"])
+        rot = 0
+        for sd in st.get("side_data_list") or []:
+            if "rotation" in sd:
+                rot = int(float(sd["rotation"]))
+        if not rot and (st.get("tags") or {}).get("rotate"):
+            rot = int(st["tags"]["rotate"])
+        return (h, w) if rot % 180 else (w, h)
+    except Exception:
+        return None
+
+
 def _num(v, digits=1):
     if v is None or v == "":
         return None
@@ -268,6 +296,7 @@ class Exporter:
             import numpy as np
         except ImportError:
             return None, []
+        import math
         events = []                     # (zeit, pfad-index, punkt-index)
         for pi, p in enumerate(paths):
             for k, pt in enumerate(p.get("points") or []):
@@ -292,7 +321,7 @@ class Exporter:
             for pi, n in upto.items():
                 pts = paths[pi]["points"][:n]
                 step = max(1, len(paths[pi]["points"]) // 14)     # etwa 14 Schaftlinien pro Bahn
-                for k in range(0, len(pts), step):
+                for k in (range(0, len(pts), step) if paths[pi].get("shafts", True) else ()):
                     _, hx, hy, sx, sy = pts[k][:5]
                     a, b = (int(hx * w), int(hy * h)), (int(sx * w), int(sy * h))
                     cv2.line(shafts, a, b, bgr[pi], thin, cv2.LINE_AA)
@@ -303,9 +332,27 @@ class Exporter:
                     cv2.polylines(alpha, [poly], False, 150, thick + 4, cv2.LINE_AA)
                     cv2.polylines(img, [poly], False, bgr[pi], thick, cv2.LINE_AA)
                     cv2.polylines(alpha, [poly], False, 255, thick, cv2.LINE_AA)
-                hx, hy = pts[-1][1], pts[-1][2]
-                cv2.circle(img, (int(hx * w), int(hy * h)), thick + 2, bgr[pi], -1, cv2.LINE_AA)
-                cv2.circle(alpha, (int(hx * w), int(hy * h)), thick + 2, 255, -1, cv2.LINE_AA)
+                hx, hy = pts[-1][1] * w, pts[-1][2] * h
+                # Pfeilspitze in Bewegungsrichtung des Schlaegerkopfs (Vektor)
+                back = next((q for q in reversed(pts[:-1])
+                             if math.hypot(q[1] * w - hx, q[2] * h - hy) > thick * 3), None)
+                if back is not None:
+                    dx, dy = hx - back[1] * w, hy - back[2] * h
+                    L = math.hypot(dx, dy)
+                    ux, uy = dx / L, dy / L
+                    size = thick * 4.5
+                    tip = (hx + ux * thick, hy + uy * thick)
+                    tri = np.array([tip,
+                                    (tip[0] - ux * size - uy * size * 0.6, tip[1] - uy * size + ux * size * 0.6),
+                                    (tip[0] - ux * size + uy * size * 0.6, tip[1] - uy * size - ux * size * 0.6)],
+                                   np.int32)
+                    cv2.polylines(img, [tri], True, (0, 0, 0), 3, cv2.LINE_AA)
+                    cv2.fillPoly(img, [tri], bgr[pi], cv2.LINE_AA)
+                    cv2.polylines(alpha, [tri], True, 200, 3, cv2.LINE_AA)
+                    cv2.fillPoly(alpha, [tri], 255, cv2.LINE_AA)
+                else:
+                    cv2.circle(img, (int(hx), int(hy)), thick + 2, bgr[pi], -1, cv2.LINE_AA)
+                    cv2.circle(alpha, (int(hx), int(hy)), thick + 2, 255, -1, cv2.LINE_AA)
             m = alpha > 0
             shafts[m] = img[m]
             shafts_a = np.maximum(shafts_a, alpha)
@@ -350,8 +397,8 @@ class Exporter:
             col = str(p.get("color", "#29b6f6")).lstrip("#")
             filters.append(
                 f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
-                f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={int(fs * 0.8)}"
-                f":y={int(fs * 0.8 + pi * fs * 2.0)}:enable='gte(t,{start:.4f})'")
+                f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x=w-tw-{int(fs * 0.7)}"
+                f":y={int(fs * 2.9 + pi * fs * 1.9)}:enable='gte(t,{start:.4f})'")
         return concat, filters
 
     def _brighten_filter(self):
@@ -376,6 +423,10 @@ class Exporter:
         video = self.store.read_json(sid, "video.json") or {}
         fps = float(video.get("fps") or 240)
         w, h = int(video.get("width") or 1280), int(video.get("height") or 720)
+        real = display_size(self.ffmpeg, clip)          # Format aus der Datei, nicht aus der App-Angabe
+        if real and real != (w, h):
+            log.info("Export %s: Bildgroesse laut Datei %dx%d (App meldete %dx%d)", sid, real[0], real[1], w, h)
+            w, h = real
         play_fps = float(self.cfg.data.get("export_playback_fps", 30))
         slow = max(1.0, fps / play_fps)
 
@@ -399,16 +450,30 @@ class Exporter:
                 f.write(text)
 
         # hochkant: Panel darf hoeher sein; quer: kompakter, damit der Schwung frei bleibt
-        fs = int(round(w * 0.034)) if h > w else int(round(h * 0.03))
+        landscape = w >= h
+        fs = int(round(h * 0.026)) if landscape else int(round(w * 0.034))
         hs = int(round(fs * 1.25))
         lh = int(round(fs * 0.45))           # Zeilenabstand
         pad = int(round(fs * 0.8))
         rows = max(len(left), len(right))
         panel_h = pad + hs + pad // 2 + rows * (fs + lh) + pad
-        x1, x2 = pad, int(w * 0.29)
-        x3, x4 = int(w * 0.54), int(w * 0.79)
-        top = f"h-{panel_h}+{pad}"
-        body = f"h-{panel_h}+{pad}+{hs}+{pad // 2}"
+        if landscape:
+            # quer: kompakter Kasten oben links - unten liegen Ball und Schwungbahn
+            x1, x2 = pad, pad + int(fs * 7.2)
+            x3, x4 = pad + int(fs * 14.8), pad + int(fs * 21.6)
+            panel_w = x4 + int(fs * 5.6) + pad
+            py = pad // 2
+            panel_box = f"drawbox=x={py}:y={py}:w={panel_w}:h={panel_h}:color=black@0.62:t=fill"
+            x1, x2, x3, x4 = (x + py for x in (x1, x2, x3, x4))
+            top = f"{py}+{pad}"
+            body = f"{py}+{pad}+{hs}+{pad // 2}"
+        else:
+            # hochkant: Panel ueber die ganze Breite unten
+            x1, x2 = pad, int(w * 0.29)
+            x3, x4 = int(w * 0.54), int(w * 0.79)
+            panel_box = f"drawbox=x=0:y=ih-{panel_h}:w=iw:h={panel_h}:color=black@0.62:t=fill"
+            top = f"h-{panel_h}+{pad}"
+            body = f"h-{panel_h}+{pad}+{hs}+{pad // 2}"
         fr, fb = _esc(FONT_REGULAR), _esc(FONT_BOLD)
 
         def dt(file, font, size, x, y, color="white"):
@@ -427,11 +492,11 @@ class Exporter:
         line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)
         # Schwungbahn (Ausholen / Abschwung) aus der automatischen Analyse
         paths = (notes.get("analysis") or {}).get("paths") or [] if self.cfg.data.get("export_paths", True) else []
-        total = (t1 or float(video.get("duration") or 30.0)) - t0 + 1.0
+        total = 600.0   # letzter Bahn-Stand "lang genug"; Ende bestimmt das Video selbst (shortest=1)
         path_list, path_filters = self._path_overlay(paths, w, h, shot_dir, fs, files, fb, t0, total)
 
         vf = ",".join(line_filters + path_filters + [
-            f"drawbox=x=0:y=ih-{panel_h}:w=iw:h={panel_h}:color=black@0.62:t=fill",
+            panel_box,
             dt("_ov_head.txt", fb, hs, x1, top, "0xFFEB3B"),
             dt("_ov_l1.txt", fr, fs, x1, body, "0xB0BEC5"),
             dt("_ov_v1.txt", fb, fs, x2, body),

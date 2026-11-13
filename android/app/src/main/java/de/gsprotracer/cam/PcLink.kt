@@ -119,7 +119,7 @@ class PcLink(private val listener: Listener) {
                 msg.optInt("upload_port", 0).takeIf { it > 0 }?.let { uploadPort = it }
                 listener.onTrigger(
                     msg.getString("shot_id"),
-                    msg.optDouble("pre", 3.5),
+                    msg.optDouble("pre", 3.6),
                     msg.optDouble("post", 0.5),
                     msg.optDouble("delay", 0.0),
                 )
