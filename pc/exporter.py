@@ -80,6 +80,40 @@ def display_size(ffmpeg, clip):
         return None
 
 
+def fix_orientation(ffmpeg, clip, mode="quer"):
+    """
+    Handy liegt quer, App hat aber hochkant gespeichert (Drehvermerk 90/270 in der MP4):
+    Der Sensor liefert dann schon ein aufrechtes Querbild, nur der Vermerk kippt es. Vermerk ersetzen,
+    ohne neu zu kodieren (verlustfrei, Sekundenbruchteile).
+    mode: "quer" (Vermerk 0), "quer_180" (Handy andersherum quer), sonst nichts tun.
+    Rueckgabe: neue (breite, hoehe) oder None, wenn nichts geaendert wurde.
+    """
+    if mode not in ("quer", "quer_180") or not ffmpeg:
+        return None
+    size = display_size(ffmpeg, clip)
+    if not size or size[0] >= size[1]:
+        return None                       # schon quer (oder unbekannt)
+    angle = "180" if mode == "quer_180" else "0"
+    tmp = clip + ".rot.mp4"
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for opts in (["-display_rotation", angle, "-i", clip],                    # FFmpeg >= 6
+                 ["-i", clip, "-metadata:s:v:0", f"rotate={angle}"]):          # aeltere Versionen
+        res = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y"] + opts +
+                             ["-map", "0", "-c", "copy", tmp], capture_output=True, text=True,
+                             timeout=60, creationflags=flags)
+        if res.returncode == 0 and os.path.exists(tmp):
+            new = display_size(ffmpeg, tmp)
+            if new and new[0] > new[1]:
+                os.replace(tmp, clip)
+                return new
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    log.warning("Clip %s konnte nicht ins Querformat gedreht werden", clip)
+    return None
+
+
 def _num(v, digits=1):
     if v is None or v == "":
         return None

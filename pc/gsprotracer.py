@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
     "export_brightness": 0.6,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
     "export_paths": True,              # Schwungbahn (Ausholen/Abschwung) ins Export-Video zeichnen
+    "clip_orientation": "quer",        # quer = hochkant gespeicherte Clips verlustfrei quer stellen,
+                                       # quer_180 = dabei auf den Kopf drehen, "" = so lassen wie aufgenommen
     "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
     "export_threads": 2,               # CPU-Kerne fuer den Export (0 = alle)
 }
@@ -779,11 +781,23 @@ def make_handler(app: TracerApp):
             if not app.store.read_json(sid, "shot.json"):
                 app.store.write_json(sid, "shot.json", {"received_at": meta["uploaded_at"],
                                                         "test": True, "payload": {}})
+            # Handy liegt quer, Clip kam hochkant -> verlustfrei ins Querformat drehen (clip_orientation)
+            try:
+                from exporter import fix_orientation
+                new = fix_orientation(app.exporter.ffmpeg, app.store.path(sid, "clip.mp4"),
+                                      app.cfg.data.get("clip_orientation", "quer"))
+                if new:
+                    log.info("Clip %s ins Querformat gedreht (%dx%d)", sid, new[0], new[1])
+                    meta["width"], meta["height"] = new
+                    app.store.write_json(sid, "video.json", meta)
+            except Exception:
+                log.exception("Drehen ins Querformat fehlgeschlagen")
             fmt = "hochkant" if meta["height"] > meta["width"] else "quer"
             log.info("Video empfangen: %s (%.1f MB, %s fps, %dx%d %s)", sid, length / 1e6, meta["fps"],
                      meta["width"], meta["height"], fmt)
             if fmt == "hochkant":
-                log.warning("Clip ist HOCHKANT - in der App 'Format: quer' waehlen (oder App updaten)")
+                log.warning("Clip ist HOCHKANT - in der App 'Format: quer' waehlen (oder App updaten), "
+                            "oder in config.json clip_orientation pruefen")
             app.exporter.enqueue(sid)
             self.send_json({"ok": True})
 

@@ -19,5 +19,6 @@
   "export_paths": true,
   "export_denoise": 3,
   "export_delay_seconds": 8,
-  "export_threads": 2
+  "export_threads": 2,
+  "clip_orientation": "quer"
 }
