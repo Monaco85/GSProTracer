@@ -141,6 +141,7 @@ Das Handy sendet nur, solange die Seite offen ist.
 | Linie: Ansprechen / Abschwung / Hilfslinie + Maus ziehen | Linie vom Schlägerkopf den Schaft entlang ziehen; wird gespeichert und ins Export-Video übernommen |
 | Linien ✕ | gespeicherte Linien des Schlags löschen |
 | CSV-Export | alle Schläge für Excel (Semikolon, Komma, km/h) |
+| 🗑 Alle Schüsse löschen | löscht alle Schüsse in `pc\shots` (Clips, Daten, Linien); fertige Videos in `pc\exports` bleiben |
 | Einstellungen | Clip-Länge und R10-Verzögerung (Kalibrierung) |
 
 Rechts: Ball- und Schlägerdaten (km/h), Smash, Face-to-Path, Video-Infos, **Video mit Schlagdaten**

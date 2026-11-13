@@ -56,6 +56,7 @@ dialog::backdrop{background:#0008}
   <button id="btnTest"title="Trigger ohne R10 auslösen (Kamera ausrichten, testen)">Testclip</button>
   <button id="btnSettings">Einstellungen</button>
   <a href="/api/export.csv"><button>CSV-Export</button></a>
+  <button id="btnDelAll" title="Alle Schüsse inkl. Original-Clips löschen (fertige Videos in pc\exports bleiben)">🗑 Alle Schüsse löschen</button>
 </header>
 <main>
   <div id="list"></div>
@@ -277,6 +278,13 @@ $('#bImpact').onclick = () => { if (cur && cur.has_video) saveNotes({ impact_tim
 let noteTimer; $('#note').oninput = () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => saveNotes({ text: $('#note').value }), 600); };
 $('#bDel').onclick = async () => { if (cur && confirm('Diesen Schuss inkl. Video löschen?')) { await fetch('/api/shots/' + cur.id, { method: 'DELETE' }); cur = null; vid.removeAttribute('src'); vid.load(); poll.sig = null; poll(); } };
 $('#btnTest').onclick = () => fetch('/api/trigger', { method: 'POST' });
+$('#btnDelAll').onclick = async () => {
+  if (!shots.length) { alert('Keine Schüsse vorhanden.'); return; }
+  if (!confirm(`Alle ${shots.length} Schüsse inkl. Original-Clips und Linien löschen?\n\nDie fertigen Videos in pc\\exports bleiben erhalten.`)) return;
+  const r = await (await fetch('/api/shots', { method: 'DELETE' })).json();
+  cur = null; vid.removeAttribute('src'); vid.load(); poll.sig = null; poll();
+  if (r.failed) alert(`${r.deleted} gelöscht, ${r.failed} nicht (wird gerade exportiert – später nochmal versuchen).`);
+};
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;

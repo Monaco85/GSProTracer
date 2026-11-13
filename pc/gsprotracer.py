@@ -760,6 +760,20 @@ def make_handler(app: TracerApp):
 
         # ---- DELETE
         def do_DELETE(self):
+            if urlparse(self.path).path == "/api/shots":
+                # alle Schuesse loeschen (fertige Videos in exports\ bleiben)
+                done, failed = 0, 0
+                for s in app.store.list():
+                    if s["id"] == app.exporter.busy:
+                        failed += 1          # wird gerade exportiert -> Dateien sind offen
+                        continue
+                    try:
+                        app.store.delete(s["id"])
+                        done += 1
+                    except OSError:
+                        failed += 1
+                log.info("Alle Schuesse geloescht: %d (nicht geloescht: %d)", done, failed)
+                return self.send_json({"ok": True, "deleted": done, "failed": failed})
             m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)$", urlparse(self.path).path)
             if not m:
                 return self.send_text("not found", 404)
