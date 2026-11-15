@@ -242,11 +242,27 @@ class Exporter:
                    "color=c=gray:s=1280x720:r=30", "-frames:v", "10", "-pix_fmt", pix] + args(20) + ["-f", "null", "-"]
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_LOW_PRIO)
-            except Exception:
+            except Exception as e:
+                log.info("Grafikkarte %s: Test nicht moeglich (%s)", label, e)
                 continue
             if res.returncode == 0:
                 log.info("Video-Export auf der Grafikkarte: %s", label)
                 return name
+            # die eigentliche Ursache steht in den Zeilen des Encoders selbst (z.B. "[h264_nvenc @ ...] Driver ...")
+            lines = [l.strip() for l in (res.stderr or "").splitlines() if l.strip()]
+            own = [l.split("]", 1)[-1].strip() for l in lines if l.startswith(f"[{name}")]
+            err = " | ".join(own or lines[:2])[:400]
+            if name == "h264_nvenc":
+                hint = ""
+                low = err.lower()
+                if "driver does not support" in low or "api version" in low or "minimum required nvidia driver" in low:
+                    hint = " -> NVIDIA-Grafiktreiber ist zu alt fuer diese FFmpeg-Version: Treiber aktualisieren " \
+                           "(GeForce Experience / nvidia.com), danach Tracer neu starten"
+                elif "cannot load" in low or "nvcuda" in low or "nvencodeapi" in low:
+                    hint = " -> NVIDIA-Treiber nicht gefunden/defekt: Treiber neu installieren"
+                log.warning("Grafikkarte %s nicht nutzbar: %s%s", label, err or "unbekannter Fehler", hint)
+            else:
+                log.info("Grafikkarte %s nicht nutzbar: %s", label, err[-120:] or "unbekannter Fehler")
         log.info("Kein Video-Encoder auf der Grafikkarte nutzbar - Export mit dem Prozessor")
         return "cpu"
 

@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15e (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
+VERSION = "2026-11-15f (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
