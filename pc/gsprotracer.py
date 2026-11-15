@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15g (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
+VERSION = "2026-11-15h (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -417,7 +417,7 @@ class GSProProxy:
             self.connected = True
             log.info("Connector <-> GSPro verbunden (ueber Proxy)")
             # gemeinsamer Zustand beider Richtungen -> beim Ende protokollieren, wer getrennt hat
-            st = {"t0": time.time(), "closed_by": None, "n_conn": 0, "n_gspro": 0,
+            st = {"t0": time.time(), "closed_by": None, "n_conn": 0, "n_gspro": 0, "b_gspro": 0, "shots": 0,
                   "last_conn": "", "last_gspro": "", "lock": threading.Lock()}
             threading.Thread(target=self._pump, args=(client, upstream, True, st), daemon=True).start()
             threading.Thread(target=self._pump, args=(upstream, client, False, st), daemon=True).start()
@@ -507,6 +507,8 @@ class GSProProxy:
                 except OSError as e:
                     reason = f"Weiterleiten an {'GSPro' if from_connector else 'Connector'} fehlgeschlagen: {e}"
                     break
+                if not from_connector:
+                    st["b_gspro"] += len(data)
                 try:
                     for obj in stream.feed(data):
                         desc = self._describe(obj)
@@ -517,6 +519,7 @@ class GSProProxy:
                                 log.info("Connector -> GSPro: %s", desc)
                             opts = obj.get("ShotDataOptions", {})
                             if opts.get("ContainsBallData") and not opts.get("IsHeartBeat"):
+                                st["shots"] += 1
                                 self.on_shot(obj)
                                 self._watch_reply(st)
                         else:
@@ -545,6 +548,15 @@ class GSProProxy:
                             "(zuletzt: %s), GSPro->Connector %d (zuletzt: %s)",
                             time.time() - st["t0"], reason, st["n_conn"], st["last_conn"] or "-",
                             st["n_gspro"], st["last_gspro"] or "-")
+                if st["shots"] and st["n_gspro"] == 0:
+                    if st["b_gspro"]:
+                        log.warning("GSPro hat %d Bytes geschickt, die kein JSON waren: Antwort unverstaendlich",
+                                    st["b_gspro"])
+                    log.warning("GSPro hat auf den Schuss gar nicht geantwortet -> der Connector gibt nach ca. 3-5 s "
+                                "auf und trennt. Das liegt an GSPro (API Connect haengt oder ist belegt), nicht an "
+                                "Tracer-Einstellungen. Abhilfe: GSPro API Connect schliessen und neu oeffnen "
+                                "(oder GSPro neu starten), dann im Connector 'Connect'.")
+                    threading.Thread(target=self.diagnose_port, daemon=True).start()
 
 
 # --------------------------------------------------------------------------- app
