@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 6
+EXPORT_VERSION = 7
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -450,6 +450,10 @@ class Exporter:
                     return
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
+        addr = (notes.get("analysis") or {}).get("address_time")
+        if self.cfg.data.get("export_trim", True) and addr is not None:
+            # Vorlauf: so lange wird die Ansprechposition vor dem Rueckschwung gezeigt (Echtzeit-Sekunden)
+            t0 = max(0.0, float(addr) - float(self.cfg.data.get("export_lead_seconds", 0.15)))
         t1 = float(sw["end"]) if self.cfg.data.get("export_trim", True) and sw.get("end") else None
         # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
         line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)

@@ -38,7 +38,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15 (Schwarzweiss, nur Ansprech- und Schlaglinie)"
+VERSION = "2026-11-15b (Schwarzweiss, nur Ansprech- und Schlaglinie, kurzer Vorlauf)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -56,6 +56,7 @@ DEFAULT_CONFIG = {
     "auto_analysis": True,             # Treffmoment + Schaftlinien automatisch erkennen (OpenCV)
     "export_trim": True,               # Export vom Ansprechen (kurz davor) bis kurz nach dem Treffmoment
     "only_complete_shots": True,       # Schuesse ohne Treffmoment/Ansprech-/Schlaglinie verwerfen
+    "export_lead_seconds": 0.15,       # Vorlauf im Export vor dem Rueckschwung (0,15 s = ~1 s in Zeitlupe 1/8)
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
     "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
@@ -131,7 +132,7 @@ class Config:
                 if k == "clip_orientation":
                     if v in ("quer", "quer_180", ""):
                         self.data[k] = v
-                elif k in DEFAULT_CONFIG and k.startswith(("clip_", "trigger_")):
+                elif k in DEFAULT_CONFIG and k.startswith(("clip_", "trigger_")) or k == "export_lead_seconds":
                     self.data[k] = float(v)
         self.save()
 
@@ -588,8 +589,9 @@ class TracerApp:
     def run(self):
         d = self.cfg.data
         log.info("GSPro Tracer, Stand %s", VERSION)
-        log.info("Einstellungen: Vorlauf %.1f s, Videolage %s, %s, Helligkeit %.1f, Zuschnitt %s, "
-                 "nur vollstaendige Schuesse %s", d.get("clip_pre_seconds"), d.get("clip_orientation") or "wie aufgenommen",
+        log.info("Einstellungen: Aufnahme-Vorlauf %.1f s, Video-Vorlauf %.2f s, Videolage %s, %s, Helligkeit %.1f, "
+                 "Zuschnitt %s, nur vollstaendige Schuesse %s", d.get("clip_pre_seconds"),
+                 float(d.get("export_lead_seconds", 0.15)), d.get("clip_orientation") or "wie aufgenommen",
                  "Schwarzweiss" if d.get("export_monochrome") else "Farbe", float(d.get("export_brightness") or 0),
                  "an" if d.get("export_trim") else "aus", "ja" if d.get("only_complete_shots") else "nein")
         self.hub.start()
@@ -808,9 +810,14 @@ def make_handler(app: TracerApp):
                     return self.send_json({"shot_id": sid})
                 if u.path == "/api/config":
                     before = app.cfg.data.get("clip_orientation")
+                    lead_before = app.cfg.data.get("export_lead_seconds")
                     app.cfg.update(json.loads(self.read_body() or b"{}"))
                     if app.cfg.data.get("clip_orientation") != before:
                         threading.Thread(target=app.reorient_all, args=(True,), daemon=True).start()
+                    elif app.cfg.data.get("export_lead_seconds") != lead_before:
+                        for s in app.store.list():          # neuer Vorlauf -> Videos neu zuschneiden
+                            if s["has_video"] and (s.get("export") or {}).get("file"):
+                                app.exporter.enqueue(s["id"])
                     return self.send_json(app.cfg.data)
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export$", u.path)
                 if m:

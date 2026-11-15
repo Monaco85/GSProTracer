@@ -205,7 +205,8 @@ sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerte
 | `clip_orientation` | quer_180 | Videolage, verlustfrei beim Empfang: `quer_180` = Sensorbild auf den Kopf gestellt, `quer` = Sensorbild, leer = wie aufgenommen. Auch auf der Analyse-Seite unter Einstellungen → Videolage; vorhandene Clips werden mitgedreht, Linien und Videos neu erstellt |
 | `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
 | `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
-| `export_trim` | true | Export ab kurz vor dem Ansprechen (0,4 s, in Zeitlupe ca. 3 s) bis 0,6 s nach dem Treffen |
+| `export_trim` | true | Export ab kurz vor dem Rückschwung (siehe `export_lead_seconds`) bis 0,6 s nach dem Treffen |
+| `export_lead_seconds` | 0,15 | Vorlauf im Export: so lange (Echtzeit) wird die Ansprechposition vor dem Rückschwung gezeigt; in Zeitlupe 1/8 ×8 |
 | `only_complete_shots` | true | Schuss nur behalten, wenn Treffmoment, Ansprechlinie und Schlaglinie erkannt wurden (Testclips immer) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
 | `ffmpeg_path` | "" | leer = automatisch suchen |
