@@ -184,6 +184,9 @@ danebenliegen – dann die Linie auf der Analyse-Seite von Hand ziehen.
 
 ## 5. Einstellungen (`pc\config.json`)
 
+Die Datei wird beim ersten Start angelegt und gehört nur dir: Sie ist nicht im Repository, `git pull` überschreibt
+sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerten. Nach einer Änderung Tracer neu starten.
+
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
 | `proxy_listen_port` | 9211 | Port, an den der Connector sendet |
