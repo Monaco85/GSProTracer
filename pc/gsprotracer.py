@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import socket
 import threading
 import time
@@ -38,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15b (Schwarzweiss, nur Ansprech- und Schlaglinie, kurzer Vorlauf)"
+VERSION = "2026-11-15c (Schwarzweiss, nur Ansprech- und Schlaglinie, kurzer Vorlauf, GSPro-Diagnose)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -357,6 +358,7 @@ class GSProProxy:
                   "last_conn": "", "last_gspro": "", "lock": threading.Lock()}
             threading.Thread(target=self._pump, args=(client, upstream, True, st), daemon=True).start()
             threading.Thread(target=self._pump, args=(upstream, client, False, st), daemon=True).start()
+            self._watch_hello(st)
 
     @staticmethod
     def _describe(obj):
@@ -369,8 +371,7 @@ class GSProProxy:
             return "Schuss"
         return "Status" if opts else "?"
 
-    @staticmethod
-    def _watch_reply(st):
+    def _watch_reply(self, st):
         """Warnen, wenn GSPro auf einen Schuss nicht antwortet (haeufig: API Connect haengt)."""
         n0 = st["n_gspro"]
 
@@ -379,9 +380,63 @@ class GSProProxy:
                 log.warning("GSPro antwortet nicht auf den Schuss! Wahrscheinlich haengt GSPro API Connect noch an "
                             "einer alten Verbindung. In GSPro API Connect schliessen und neu starten, dann im "
                             "Connector auf 'Connect' druecken.")
+                self.diagnose_port()
         t = threading.Timer(3.0, check)
         t.daemon = True
         t.start()
+
+    def _watch_hello(self, st):
+        """GSPro meldet sich nach dem Verbinden normalerweise sofort (Spieler-Info). Bleibt es stumm -> warnen."""
+        def check():
+            if st["closed_by"] is None and st["n_gspro"] == 0:
+                log.warning("GSPro hat sich nach dem Verbinden nicht gemeldet - Schuesse werden vermutlich nicht "
+                            "ankommen. GSPro API Connect neu starten, dann im Connector 'Connect'.")
+                self.diagnose_port()
+        t = threading.Timer(5.0, check)
+        t.daemon = True
+        t.start()
+
+    def diagnose_port(self):
+        """Unter Windows: alle Verbindungen auf dem GSPro-Port mit Programmname ins Log schreiben."""
+        if os.name != "nt":
+            return
+        port = int(self.cfg["gspro_port"])
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=15,
+                                 creationflags=flags).stdout
+        except Exception as e:
+            log.info("Port-Diagnose nicht moeglich: %s", e)
+            return
+        names = {}
+
+        def name(pid):
+            if pid not in names:
+                try:
+                    r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                                       text=True, timeout=10, creationflags=flags).stdout.strip()
+                    names[pid] = r.split('","')[0].strip('"') if r.startswith('"') else "?"
+                except Exception:
+                    names[pid] = "?"
+            return names[pid]
+
+        rows = []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 5 or parts[0].upper() != "TCP":
+                continue
+            local, remote, state, pid = parts[1], parts[2], parts[3], parts[4]
+            if local.endswith(f":{port}") or remote.endswith(f":{port}"):
+                rows.append(f"{state:<12} {local:<22} <-> {remote:<22} {name(pid)} (PID {pid})")
+        if not rows:
+            log.warning("Diagnose: Auf Port %d lauscht nichts - laeuft GSPro API Connect?", port)
+            return
+        established = [r for r in rows if r.startswith("ESTABLISHED") and f":{port} " in r.split("<->")[0] + " "]
+        log.warning("Diagnose Port %d (%d Verbindung(en) zu GSPro):\n    %s", port, len(established),
+                    "\n    ".join(rows))
+        if len(established) > 1:
+            log.warning("Mehr als eine Verbindung zu GSPro! GSPro bedient nur eine - die andere(n) blockieren. "
+                        "Das jeweilige Programm schliessen oder GSPro komplett neu starten.")
 
     def _pump(self, src, dst, from_connector, st):
         stream = JsonStream()
