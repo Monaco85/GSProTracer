@@ -206,6 +206,17 @@ def _esc(path):
     return path.replace("\\", "/").replace(":", "\\:")
 
 
+# Video-Encoder auf der Grafikkarte (eigener Video-Chip, bremst GSPro kaum): Name -> (FFmpeg-Argumente, Pixelformat)
+GPU_ENCODERS = {
+    "h264_nvenc": ("NVIDIA NVENC", lambda q: ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr",
+                                               "-cq", str(q + 3), "-b:v", "0"], "yuv420p"),
+    "h264_qsv": ("Intel Quick Sync", lambda q: ["-c:v", "h264_qsv", "-preset", "medium",
+                                                "-global_quality", str(q + 3)], "nv12"),
+    "h264_amf": ("AMD AMF", lambda q: ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp",
+                                       "-qp_i", str(q + 2), "-qp_p", str(q + 4)], "yuv420p"),
+}
+
+
 class Exporter:
     def __init__(self, store, cfg):
         self.store = store
@@ -213,10 +224,41 @@ class Exporter:
         self.q = queue.Queue()
         self.ffmpeg = find_ffmpeg(cfg.data.get("ffmpeg_path", ""))
         self.busy = None
+        self.encoder = None          # wird beim ersten Export ermittelt ("cpu" oder Name aus GPU_ENCODERS)
         if self.ffmpeg:
             log.info("FFmpeg: %s", self.ffmpeg)
         else:
             log.warning("FFmpeg nicht gefunden - kein Video-Export mit Schlagdaten (winget install Gyan.FFmpeg)")
+
+    def _pick_encoder(self):
+        """Grafikkarten-Encoder suchen (Probe-Kodierung von 10 Bildern), sonst Prozessor (libx264)."""
+        want = str(self.cfg.data.get("export_encoder", "auto") or "auto")
+        if want in ("cpu", "libx264"):
+            return "cpu"
+        cands = [want] if want in GPU_ENCODERS else list(GPU_ENCODERS)
+        for name in cands:
+            label, args, pix = GPU_ENCODERS[name]
+            cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                   "color=c=gray:s=1280x720:r=30", "-frames:v", "10", "-pix_fmt", pix] + args(20) + ["-f", "null", "-"]
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_LOW_PRIO)
+            except Exception:
+                continue
+            if res.returncode == 0:
+                log.info("Video-Export auf der Grafikkarte: %s", label)
+                return name
+        log.info("Kein Video-Encoder auf der Grafikkarte nutzbar - Export mit dem Prozessor")
+        return "cpu"
+
+    def _encoder_args(self, enc):
+        q = int(self.cfg.data.get("export_crf", 20))
+        if enc in GPU_ENCODERS:
+            _, args, pix = GPU_ENCODERS[enc]
+            return args(q) + ["-pix_fmt", pix]
+        preset = str(self.cfg.data.get("export_preset", "medium"))
+        # nicht alle Kerne belegen (GSPro braucht Rechenleistung)
+        thr = str(int(self.cfg.data.get("export_threads", 2) or 0))
+        return ["-c:v", "libx264", "-preset", preset, "-crf", str(q), "-threads", thr, "-pix_fmt", "yuv420p"]
 
     @property
     def out_dir(self):
@@ -489,14 +531,23 @@ class Exporter:
             cur = f"[l{i}]"
         chain.append(f"{cur}{vf}[out]")
         cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
-        crf = str(int(self.cfg.data.get("export_crf", 18)))
-        preset = str(self.cfg.data.get("export_preset", "medium"))
-        # nicht alle Kerne belegen (GSPro braucht Rechenleistung)
-        thr = str(int(self.cfg.data.get("export_threads", 2) or 0))
-        cmd += ["-r", f"{play_fps:g}", "-c:v", "libx264", "-preset", preset, "-crf", crf, "-threads", thr,
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", os.path.basename(tmp)]
+        if self.encoder is None:
+            self.encoder = self._pick_encoder()
         flags = _LOW_PRIO
-        res = subprocess.run(cmd, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)
+        started = time.time()
+        enc = self.encoder
+        while True:
+            # NVIDIA: auch das Lesen (Dekodieren) des 240-fps-Clips auf der Grafikkarte
+            hw = ["-hwaccel", "cuda"] if enc == "h264_nvenc" and self.cfg.data.get("export_hwdecode", True) else []
+            full = cmd[:5] + hw + cmd[5:] + ["-r", f"{play_fps:g}"] + self._encoder_args(enc) + \
+                ["-movflags", "+faststart", "-an", os.path.basename(tmp)]
+            res = subprocess.run(full, cwd=shot_dir, capture_output=True, text=True, timeout=600, creationflags=flags)
+            if res.returncode == 0 or enc == "cpu":
+                break
+            # Grafikkarte hat abgelehnt -> ab jetzt mit dem Prozessor
+            log.warning("Export auf der Grafikkarte (%s) fehlgeschlagen, nehme den Prozessor: %s",
+                        GPU_ENCODERS[enc][0], (res.stderr or "").strip()[-200:])
+            enc = self.encoder = "cpu"
         for name in list(files) + list(line_inputs):
             try:
                 os.remove(os.path.join(shot_dir, name))
@@ -515,4 +566,5 @@ class Exporter:
             "file": name, "created_at": datetime.now().isoformat(timespec="seconds"),
             "slowmo": slow, "fps": play_fps, "version": EXPORT_VERSION,
         })
-        log.info("Export gespeichert: %s", os.path.join(self.out_dir, name))
+        log.info("Export gespeichert: %s (%.0f s, %s)", os.path.join(self.out_dir, name), time.time() - started,
+                 GPU_ENCODERS[enc][0] if enc in GPU_ENCODERS else "Prozessor")

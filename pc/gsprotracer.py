@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15d (Schwarzweiss, nur Ansprech- und Schlaglinie, kurzer Vorlauf, GSPro-Diagnose)"
+VERSION = "2026-11-15e (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -60,7 +60,8 @@ DEFAULT_CONFIG = {
     "export_lead_seconds": 0.15,       # Vorlauf im Export vor dem Rueckschwung (0,15 s = ~1 s in Zeitlupe 1/8)
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
-    "export_preset": "medium",         # x264-Preset (slow = etwas kleiner, dauert laenger)
+    "export_encoder": "auto",          # auto = Grafikkarte (NVIDIA/Intel/AMD) wenn moeglich, sonst Prozessor; cpu = immer Prozessor
+    "export_preset": "medium",         # x264-Preset bei Prozessor-Export (slow = etwas kleiner, dauert laenger)
     "export_brightness": 1.0,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
     "export_monochrome": True,         # Schwarzweiss: Schwung klarer, farbige Linien heben sich ab
     "clip_orientation": "quer_180",    # Clips verlustfrei drehen: quer = Sensorbild, quer_180 = auf dem Kopf
