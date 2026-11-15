@@ -242,7 +242,7 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 | Seite meldet „Seite bitte über http://localhost:8090 öffnen“ | Seite wurde als Datei geöffnet – Adresse im Browser verwenden |
 | „Tracer-Programm nicht erreichbar“ | `pc\start_tracer.bat` starten |
 | „Connector nicht verbunden“ | Port in der Connector-`settings.json` auf 9211; Reihenfolge GSPro → Tracer → Connector |
-| Connector: „GSPro Send Error“, im Log „GSPro antwortet nicht“ / „GSPro hat sich nach dem Verbinden nicht gemeldet“ bzw. „GSPro->Connector 0 Nachrichten“ | Darunter steht automatisch eine **Diagnose** aller Verbindungen zu GSPro (Port 921) mit Programmnamen. Mehr als eine Verbindung → das überzählige Programm schließen. Sonst: GSPro API Connect hängt noch an einer alten Verbindung: in GSPro API Connect schließen und neu starten, dann im Connector „Connect“. Reihenfolge: GSPro + API Connect → Tracer → Connector |
+| Connector: „GSPro Send Error“, im Log „GSPro antwortet seit 8 s nicht“ bzw. „GSPro->Connector 0 Nachrichten“ | Darunter steht automatisch eine **Diagnose** aller Verbindungen zu GSPro (Port 921) mit Programmnamen. Mehr als eine Verbindung → das überzählige Programm schließen. Sonst: GSPro API Connect hängt noch an einer alten Verbindung: in GSPro API Connect schließen und neu starten, dann im Connector „Connect“. Reihenfolge: GSPro + API Connect → Tracer → Connector |
 | App: „PC nicht erreichbar“ | richtige PC-IP? gleiches WLAN? Firewall für Python (private Netzwerke) erlaubt? |
 | Video steht auf dem Kopf / liegt seitlich | Analyse-Seite → Einstellungen → Videolage umstellen |
 | Im Log „Clip ist HOCHKANT“ | In der App „Format: quer“ wählen bzw. App updaten; Querformat ist Standard |
