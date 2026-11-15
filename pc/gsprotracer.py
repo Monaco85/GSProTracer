@@ -37,6 +37,9 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 log = logging.getLogger("tracer")
 
+# Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
+VERSION = "2026-11-15 (Schwarzweiss, nur Ansprech- und Schlaglinie)"
+
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
     "gspro_host": "127.0.0.1",
@@ -583,6 +586,12 @@ class TracerApp:
         return changed
 
     def run(self):
+        d = self.cfg.data
+        log.info("GSPro Tracer, Stand %s", VERSION)
+        log.info("Einstellungen: Vorlauf %.1f s, Videolage %s, %s, Helligkeit %.1f, Zuschnitt %s, "
+                 "nur vollstaendige Schuesse %s", d.get("clip_pre_seconds"), d.get("clip_orientation") or "wie aufgenommen",
+                 "Schwarzweiss" if d.get("export_monochrome") else "Farbe", float(d.get("export_brightness") or 0),
+                 "an" if d.get("export_trim") else "aus", "ja" if d.get("only_complete_shots") else "nein")
         self.hub.start()
         self.proxy.start()
         # vorhandene Clips richtig herum drehen (z.B. nach Aenderung von clip_orientation)

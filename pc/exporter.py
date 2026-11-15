@@ -20,6 +20,8 @@ from datetime import datetime
 log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
+# Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
+EXPORT_VERSION = 6
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -224,10 +226,19 @@ class Exporter:
 
     def start(self):
         threading.Thread(target=self._worker, daemon=True, name="exporter").start()
-        # Nachholen: Clips ohne Export (z.B. vor dem Update aufgenommen)
+        # Nachholen: Clips ohne Export und Videos aus aelteren Versionen (z.B. noch mit Schwungbahn/in Farbe)
+        redo = 0
         for s in self.store.list():
-            if s["has_video"] and not s.get("export"):
+            ex = s.get("export") or {}
+            if not s["has_video"]:
+                continue
+            if not ex:
                 self.enqueue(s["id"])
+            elif ex.get("file") and ex.get("version") != EXPORT_VERSION:
+                self.enqueue(s["id"])
+                redo += 1
+        if redo:
+            log.info("%d Export-Video(s) aus einer aelteren Version werden neu erstellt", redo)
 
     def enqueue(self, shot_id):
         if self.ffmpeg:
@@ -498,6 +509,6 @@ class Exporter:
         os.replace(tmp, os.path.join(self.out_dir, name))
         self.store.write_json(sid, "export.json", {
             "file": name, "created_at": datetime.now().isoformat(timespec="seconds"),
-            "slowmo": slow, "fps": play_fps,
+            "slowmo": slow, "fps": play_fps, "version": EXPORT_VERSION,
         })
         log.info("Export gespeichert: %s", os.path.join(self.out_dir, name))
