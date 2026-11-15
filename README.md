@@ -208,7 +208,7 @@ sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerte
 | `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
 | `export_trim` | true | Export ab kurz vor dem Rückschwung (siehe `export_lead_seconds`) bis 0,6 s nach dem Treffen |
 | `export_lead_seconds` | 0,15 | Vorlauf im Export: so lange (Echtzeit) wird die Ansprechposition vor dem Rückschwung gezeigt; in Zeitlupe 1/8 ×8 |
-| `only_complete_shots` | true | Schuss nur behalten, wenn Treffmoment, Ansprechlinie und Schlaglinie erkannt wurden (Testclips immer) |
+| `only_complete_shots` | true | Schuss nur behalten, wenn Treffmoment, Ansprechlinie und Schlaglinie erkannt wurden (Testclips immer). Verworfene Schüsse landen in `pc\verworfen\` (die letzten 30, mit `verworfen.txt` = Grund) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
 | `ffmpeg_path` | "" | leer = automatisch suchen |
 

@@ -27,3 +27,4 @@ Thumbs.db
 # eigene Einstellungen - werden beim ersten Start angelegt und von git pull nie ueberschrieben
 pc/config.json
 pc/config.json.defekt.txt
+pc/verworfen/

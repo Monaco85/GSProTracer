@@ -181,9 +181,13 @@ def analyze(path, trigger_time=None):
     e = motion_curve(frames, ball, fps)
     address = find_address(e, impact, fps)
     head = (ball[0], ball[1])
+    if address is None:
+        res["address_error"] = "kein ruhiger Moment vor dem Rueckschwung gefunden"
     if address is not None:
         res["address_time"] = round(address / fps, 4)
         ref = find_takeaway_quiet(e, address, impact, fps)
+        if ref is None:
+            res["address_error"] = "kein Bild ohne Schlaeger am Ball (oben im Rueckschwung) gefunden"
         if ref is not None:
             # mehrere ruhige Bilder vor dem Rueckschwung probieren
             shaft = None
@@ -195,6 +199,8 @@ def analyze(path, trigger_time=None):
                 if shaft:
                     address = fi
                     break
+            if not shaft:
+                res["address_error"] = "Schaft beim Ansprechen nicht gefunden"
             if shaft:
                 x1, y1, x2, y2 = shaft
                 res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,
@@ -202,6 +208,7 @@ def analyze(path, trigger_time=None):
                                      "extend": True, "auto": True, "frame_time": round(address / fps, 4)})
                 head = (x1, y1)
     # Abschwung: einige Bilder vor dem Treffen, Referenz ~0,2 s frueher
+    res["downswing_error"] = "Schaft vor dem Treffen nicht gefunden"
     for k in (4, 3, 5, 6, 2, 8):
         d = impact - k
         r = impact - int(0.2 * fps)
@@ -213,6 +220,7 @@ def analyze(path, trigger_time=None):
             res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,
                                  "color": "#ff9800", "label": "Abschwung", "from": round(d / fps, 4),
                                  "extend": True, "auto": True, "frame_time": round(d / fps, 4)})
+            res.pop("downswing_error", None)
             break
     # Schnittfenster fuer den Export: Ansprechposition kurz zeigen, dann Schwung bis kurz nach dem Treffen
     start = (address / fps - ADDRESS_LEAD) if address is not None else (impact / fps - 2.5)

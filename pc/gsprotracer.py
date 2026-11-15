@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15f (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
+VERSION = "2026-11-15g (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -150,6 +150,9 @@ class Config:
 
 
 # --------------------------------------------------------------------------- shot store
+REJECT_MARK = "_verworfen"
+
+
 class ShotStore:
     def __init__(self, root):
         self.root = root
@@ -201,14 +204,73 @@ class ShotStore:
 
     def list(self):
         ids = [d for d in os.listdir(self.root)
-               if SHOT_ID_RE.match(d) and os.path.isdir(os.path.join(self.root, d))]
+               if SHOT_ID_RE.match(d) and os.path.isdir(os.path.join(self.root, d))
+               and not os.path.exists(os.path.join(self.root, d, REJECT_MARK))]
         ids.sort(reverse=True)
         return [s for s in (self.get(i) for i in ids) if s]
+
+    @staticmethod
+    def _retry(fn, tries=12, wait=0.4):
+        """Windows sperrt frisch geschriebene Dateien kurz (Virenscanner, Vorschau) -> mehrmals versuchen."""
+        for i in range(tries):
+            try:
+                return fn()
+            except PermissionError:
+                if i == tries - 1:
+                    raise
+                time.sleep(wait)
 
     def delete(self, shot_id):
         p = self.path(shot_id)
         if os.path.isdir(p):
-            shutil.rmtree(p)
+            self._retry(lambda: shutil.rmtree(p))
+
+    @property
+    def rejected_dir(self):
+        return os.path.join(os.path.dirname(os.path.abspath(self.root)), "verworfen")
+
+    def reject(self, shot_id, reason, keep=30):
+        """
+        Schuss aus der Liste nehmen und in den Ordner verworfen verschieben (nicht loeschen - zum Nachsehen/Verbessern
+        der Erkennung). Es bleiben die letzten 'keep' verworfenen Schuesse.
+        """
+        src = self.path(shot_id)
+        if not os.path.isdir(src):
+            return
+        with open(os.path.join(src, "verworfen.txt"), "w", encoding="utf-8") as f:
+            f.write(reason + "\n")
+        with open(os.path.join(src, REJECT_MARK), "w") as f:      # sofort aus der Liste, auch wenn Verschieben haengt
+            f.write("1")
+        try:
+            self._move_rejected(shot_id)
+        except OSError as e:
+            log.info("Verschieben nach verworfen\\ spaeter (%s)", e)
+        try:
+            old = sorted(d for d in os.listdir(self.rejected_dir) if SHOT_ID_RE.match(d))
+            for d in old[:-keep] if len(old) > keep else []:
+                shutil.rmtree(os.path.join(self.rejected_dir, d), ignore_errors=True)
+        except OSError:
+            pass
+
+    def _move_rejected(self, shot_id):
+        os.makedirs(self.rejected_dir, exist_ok=True)
+        dst = os.path.join(self.rejected_dir, shot_id)
+        if os.path.exists(dst):
+            shutil.rmtree(dst, ignore_errors=True)
+        self._retry(lambda: os.replace(self.path(shot_id), dst))
+        try:
+            os.remove(os.path.join(dst, REJECT_MARK))
+        except OSError:
+            pass
+
+    def cleanup_rejected(self):
+        """Beim Start: markierte, aber noch nicht verschobene Schuesse nachholen."""
+        for d in os.listdir(self.root):
+            if SHOT_ID_RE.match(d) and os.path.exists(os.path.join(self.root, d, REJECT_MARK)):
+                try:
+                    self._move_rejected(d)
+                except OSError:
+                    pass
 
 
 # --------------------------------------------------------------------------- JSON stream
@@ -635,6 +697,7 @@ class TracerApp:
         return changed
 
     def run(self):
+        self.store.cleanup_rejected()
         d = self.cfg.data
         log.info("GSPro Tracer, Stand %s", VERSION)
         log.info("Einstellungen: Aufnahme-Vorlauf %.1f s, Video-Vorlauf %.2f s, Videolage %s, %s, Helligkeit %.1f, "

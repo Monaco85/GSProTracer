@@ -348,8 +348,9 @@ class Exporter:
             if notes.get("impact_time") is None:
                 notes["impact_time"] = res["impact_time"]
             notes["swing"] = {"start": res["swing_start"], "end": res["swing_end"]}
-            log.info("Analyse %s: Treffmoment %.3f s, Linien: %s", sid, res["impact_time"],
-                     ", ".join(l["label"] for l in res.get("lines", [])) or "keine")
+            why = "; ".join(f"{k.split('_')[0]}: {res[k]}" for k in ("address_error", "downswing_error") if res.get(k))
+            log.info("Analyse %s: Treffmoment %.3f s, Linien: %s%s", sid, res["impact_time"],
+                     ", ".join(l["label"] for l in res.get("lines", [])) or "keine", f" ({why})" if why else "")
         self.store.write_json(sid, "notes.json", notes)
         return notes
 
@@ -498,13 +499,16 @@ class Exporter:
                                            ("Ansprechlinie", "Ansprechen" in labels),
                                            ("Schlaglinie", "Abschwung" in labels)) if not ok]
                 if missing:
-                    log.warning("Schuss %s nicht gespeichert - nicht erkannt: %s", sid, ", ".join(missing))
+                    why = [str(notes["analysis"][k]) for k in ("error", "address_error", "downswing_error")
+                           if notes["analysis"].get(k)]
+                    reason = "nicht erkannt: " + ", ".join(missing) + (f" ({'; '.join(why)})" if why else "")
+                    log.warning("Schuss %s nicht gespeichert - %s -> pc\\verworfen\\", sid, reason)
                     for name in list(files):
                         try:
                             os.remove(os.path.join(shot_dir, name))
                         except OSError:
                             pass
-                    self.store.delete(sid)
+                    self.store.reject(sid, reason)
                     return
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
