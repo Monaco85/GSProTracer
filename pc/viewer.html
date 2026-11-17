@@ -23,11 +23,11 @@ main{display:grid;grid-template-columns:260px 1fr 290px;gap:0;flex:1;min-height:
 .shot .t{color:var(--muted);font-size:12px} .shot .v{font-variant-numeric:tabular-nums}
 .shot .nv{color:var(--warn);font-size:11px}
 #center{display:flex;flex-direction:column;min-width:0;padding:12px;gap:8px}
-#stages{flex:1;min-height:0;display:flex;gap:8px;align-items:flex-start}
+#stages{flex:1;min-height:0;display:flex;gap:8px}
 #stage,#stage2{position:relative;min-width:0;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-#stage{flex:1.6;align-self:stretch}
-/* Seitenkamera kleiner: ~40 % der Breite, nur so hoch wie das Bild */
-#stage2{display:none;flex:1;max-height:100%}
+#stage{flex:1}
+/* Seitenkamera: so breit, wie ihr Bild bei voller Hoehe braucht (quer oder hochkant), hoechstens 32 % */
+#stage2{display:none;flex:0 0 35%}
 #stages.two #stage2{display:flex}
 #stage video,#stage2 video{max-width:100%;max-height:100%;display:block}
 .camlbl{position:absolute;left:8px;top:6px;font-size:11px;color:#fff;background:#0009;padding:2px 7px;border-radius:99px;pointer-events:none;z-index:2;display:none}
@@ -388,7 +388,16 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------------------------------------------------------------- drawing (Linien, z.B. Schwungebene)
+// Breite der Seitenkamera aus ihrem Seitenverhaeltnis (Video hinten bekommt den Rest)
+function layoutStages() {
+  const st = $('#stages'), s2 = $('#stage2');
+  if (!st.classList.contains('two') || !vid2.videoWidth || window.innerWidth <= 1000) { s2.style.flex = ''; return; }
+  const H = st.clientHeight, total = st.clientWidth;
+  const w = Math.min(H * vid2.videoWidth / vid2.videoHeight, total * 0.32);
+  s2.style.flex = `0 0 ${Math.round(w)}px`;
+}
 function fitCanvas() {
+  layoutStages();
   const r = vid.getBoundingClientRect(), s = $('#stage').getBoundingClientRect();
   cv.width = r.width; cv.height = r.height; cv.style.left = (r.left - s.left) + 'px'; cv.style.top = (r.top - s.top) + 'px';
   const c2 = $('#cv2'), r2 = vid2.getBoundingClientRect(), s2 = $('#stage2').getBoundingClientRect();
