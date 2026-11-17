@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-17b (zwei Kameras synchron, Fokus fest auf Ball)"
+VERSION = "2026-11-17d (zwei Kameras, Linien seitlich, Fokus auf Ball, mph + Carry)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -736,7 +736,7 @@ class TracerApp:
         httpd.daemon_threads = True
         log.info("Analyse-Oberflaeche: http://localhost:%d", self.cfg["http_port"])
         log.info("Shots werden gespeichert in: %s", self.store.root)
-        log.info("Videos mit Schlagdaten (km/h) in: %s", self.exporter.out_dir)
+        log.info("Videos mit Schlagdaten (mph, Carry m) in: %s", self.exporter.out_dir)
         log.info("PC-IP-Adressen fuer die Handy-App: %s", ", ".join(local_ips()) or "?")
         httpd.serve_forever()
 
@@ -894,17 +894,18 @@ def make_handler(app: TracerApp):
         def send_csv(self):
             out = io.StringIO()
             w = csv.writer(out, delimiter=";")
+            from exporter import carry_m
             cols_ball = ["Speed", "VLA", "HLA", "TotalSpin", "SpinAxis", "Backspin", "SideSpin"]
             cols_club = ["Speed", "AngleOfAttack", "FaceToTarget", "Path", "HorizontalFaceImpact"]
-            names = {"Speed": "Speed_kmh"}
-            w.writerow(["shot_id", "zeit", "schlaeger", "video", "smash"]
+            names = {"Speed": "Speed_mph"}
+            w.writerow(["shot_id", "zeit", "schlaeger", "video", "smash", "carry_m"]
                        + [f"ball_{names.get(c, c)}" for c in cols_ball]
                        + [f"club_{names.get(c, c)}" for c in cols_club] + ["notiz"])
 
             def val(d, c):
                 v = d.get(c, "")
                 if c == "Speed" and isinstance(v, (int, float)):
-                    v = round(v * MPH_TO_KMH, 1)
+                    v = round(v, 1)
                 return str(v).replace(".", ",")
             for s in app.store.list():
                 rec = s["shot"] or {}
@@ -913,7 +914,8 @@ def make_handler(app: TracerApp):
                 bs, cs = bd.get("Speed"), cd.get("Speed")
                 smash = f"{bs / cs:.2f}".replace(".", ",") if isinstance(bs, (int, float)) and isinstance(cs, (int, float)) and cs else ""
                 w.writerow([s["id"], rec.get("received_at", ""), rec.get("club") or "",
-                            "ja" if s["has_video"] else "nein", smash]
+                            "ja" if s["has_video"] else "nein", smash,
+                            f"{carry_m(pl):.1f}".replace(".", ",") if carry_m(pl) else ""]
                            + [val(bd, c) for c in cols_ball]
                            + [val(cd, c) for c in cols_club]
                            + [s["notes"].get("text", "")])
@@ -1098,7 +1100,7 @@ def make_handler(app: TracerApp):
                             "oder Videolage in den Einstellungen pruefen")
             if side:
                 if base == app.store.path(sid):
-                    threading.Thread(target=app.exporter.sync_side, args=(sid,), daemon=True).start()
+                    app.exporter.enqueue("side:" + sid)     # synchronisieren + Linien (in der Warteschlange)
             else:
                 app.exporter.enqueue(sid)
             self.send_json({"ok": True})

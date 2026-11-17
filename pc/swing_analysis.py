@@ -29,9 +29,13 @@ except ImportError:  # Analyse ist optional
 ADDRESS_LEAD = 0.4   # Sekunden vor dem Ansprech-Bild, mit denen das Export-Video beginnt (1/8 Zeitlupe: ~3 s)
 
 
-def _read_gray(path, max_frames=2400):
+def _read_gray(path, max_frames=2400, skip_seconds=0.0):
+    """Graubilder lesen; skip_seconds am Anfang ueberspringen (spart Speicher). Rueckgabe frames, fps, skip."""
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 240.0
+    skip = 0
+    while skip < int(max(0.0, skip_seconds) * fps) and cap.grab():
+        skip += 1
     frames = []
     while len(frames) < max_frames:
         ok, f = cap.read()
@@ -39,7 +43,7 @@ def _read_gray(path, max_frames=2400):
             break
         frames.append(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY))
     cap.release()
-    return frames, fps
+    return frames, fps, skip
 
 
 def _smooth(a, k):
@@ -115,7 +119,7 @@ def find_takeaway_quiet(e, address, impact, fps):
     return seg[len(seg) // 2] if seg else None
 
 
-def detect_shaft(frame, ref, ball, head_hint=None):
+def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88):
     """Schaftlinie im Bild 'frame' (mit Schlaeger) gegen 'ref' (ohne Schlaeger in Ballnaehe)."""
     H, W = frame.shape
     bx, by = ball
@@ -136,7 +140,7 @@ def detect_shaft(frame, ref, ball, head_hint=None):
             x1, y1, x2, y2 = x2, y2, x1, y1
         length = math.hypot(x2 - x1, y2 - y1)
         ang = math.degrees(math.atan2(y1 - y2, abs(x2 - x1)))
-        if not 25 <= ang <= 88:
+        if not 25 <= ang <= max_ang:
             continue
         # Abstand der verlaengerten Linie zum Schlaegerkopf (neben dem Ball)
         A, B, C = y2 - y1, x1 - x2, x2 * y1 - x1 * y2
@@ -185,14 +189,20 @@ def impact_in_window(path, trigger_time, before=2.5, after=0.3):
     return None if idx is None else round((first + idx) / fps, 4)
 
 
-def analyze(path, trigger_time=None):
+def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung")):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
     {"error": ...}. Zeiten in Sekunden im Clip.
+    max_ang: steilster erlaubter Schaftwinkel (Seitenkamera: Schaft steht fast senkrecht).
+    window: nur die letzten 'window' Sekunden vor dem Trigger lesen (spart Speicher).
+    labels: Beschriftung der Linien beim Ansprechen und kurz vor dem Treffen.
     """
     if not AVAILABLE:
         return {"error": "OpenCV fehlt (pip install opencv-python-headless numpy)"}
-    frames, fps = _read_gray(path)
+    frames, fps, skip = _read_gray(path, skip_seconds=(trigger_time - window) if (window and trigger_time) else 0.0)
+    t_off = skip / fps
+    if trigger_time is not None:
+        trigger_time -= t_off
     if len(frames) < fps * 0.8:
         return {"error": "Clip zu kurz"}
     H, W = frames[0].shape
@@ -223,7 +233,7 @@ def analyze(path, trigger_time=None):
                 fi = address - int(back * fps)
                 if fi < 0:
                     break
-                shaft = detect_shaft(frames[fi], frames[ref], ball, head)
+                shaft = detect_shaft(frames[fi], frames[ref], ball, head, max_ang)
                 if shaft:
                     address = fi
                     break
@@ -232,7 +242,7 @@ def analyze(path, trigger_time=None):
             if shaft:
                 x1, y1, x2, y2 = shaft
                 res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,
-                                     "color": "#4aa3ff", "label": "Ansprechen", "from": 0.0,
+                                     "color": "#4aa3ff", "label": labels[0], "from": 0.0,
                                      "extend": True, "auto": True, "frame_time": round(address / fps, 4)})
                 head = (x1, y1)
     # Abschwung: einige Bilder vor dem Treffen, Referenz ~0,2 s frueher
@@ -242,11 +252,11 @@ def analyze(path, trigger_time=None):
         r = impact - int(0.2 * fps)
         if r < 0:
             break
-        shaft = detect_shaft(frames[d], frames[r], ball, head)
+        shaft = detect_shaft(frames[d], frames[r], ball, head, max_ang)
         if shaft:
             x1, y1, x2, y2 = shaft
             res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,
-                                 "color": "#ff9800", "label": "Abschwung", "from": round(d / fps, 4),
+                                 "color": "#ff9800", "label": labels[1], "from": round(d / fps, 4),
                                  "extend": True, "auto": True, "frame_time": round(d / fps, 4)})
             res.pop("downswing_error", None)
             break
@@ -254,4 +264,12 @@ def analyze(path, trigger_time=None):
     start = (address / fps - ADDRESS_LEAD) if address is not None else (impact / fps - 2.5)
     res["swing_start"] = round(max(0.0, start), 4)
     res["swing_end"] = round(min(len(frames) / fps, impact / fps + 0.6), 4)
+    if t_off:                                   # Zeiten auf den ganzen Clip beziehen
+        for k in ("impact_time", "address_time", "swing_start", "swing_end"):
+            if k in res:
+                res[k] = round(res[k] + t_off, 4)
+        for ln in res["lines"]:
+            ln["frame_time"] = round(ln["frame_time"] + t_off, 4)
+            if ln["from"]:
+                ln["from"] = round(ln["from"] + t_off, 4)
     return res

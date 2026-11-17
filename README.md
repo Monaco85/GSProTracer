@@ -1,7 +1,7 @@
 # GSPro Tracer
 
 Schwungvideos mit **240 fps** vom Handy (Poco X3) – automatisch zu jedem Schlag, den der **Garmin R10** an
-**GSPro** meldet. Am PC: Zeitlupen-Analyse im Browser, fertige Videos mit eingeblendeten Schlagdaten in **km/h**
+**GSPro** meldet. Am PC: Zeitlupen-Analyse im Browser, fertige Videos mit eingeblendeten Schlagdaten (**mph**, **Carry in m**)
 und automatisch eingezeichneten **Schaftlinien** (Ansprechen / Abschwung).
 
 ```
@@ -48,7 +48,7 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
 
 **PC (Windows, Python)**
 - Transparenter Proxy zwischen Connector und GSPro – GSPro merkt davon nichts
-- **Analyse-Seite** <http://localhost:8090>: Zeitlupe bis 1/16, Bild für Bild, Ball-/Schlägerdaten in km/h,
+- **Analyse-Seite** <http://localhost:8090>: Zeitlupe bis 1/16, Bild für Bild, Ball-/Schlägerdaten in mph, Carry (Garmin) in m,
   Smash, Face-to-Path, Notizen, Durchschnitt pro Schläger, CSV-Export (Excel)
 - **Kamera ausrichten** <http://localhost:8090/live>: Live-Bild mit Raster und Markierungen
 - **Automatischer Export** nach `pc\exports\`: Zeitlupe 1/8 mit Datenpanel, aufgehellt, zugeschnitten auf den Schwung
@@ -141,11 +141,11 @@ Das Handy sendet nur, solange die Seite offen ist.
 | Tempo 1× … 1/16 | Zeitlupe (1/8 ≈ jedes 240-fps-Bild einzeln) |
 | Linie: Ansprechen / Abschwung / Hilfslinie + Maus ziehen | Linie vom Schlägerkopf den Schaft entlang ziehen; wird gespeichert und ins Export-Video übernommen |
 | Linien ✕ | gespeicherte Linien des Schlags löschen |
-| CSV-Export | alle Schläge für Excel (Semikolon, Komma, km/h) |
+| CSV-Export | alle Schläge für Excel (Semikolon, Komma, mph, Carry in m) |
 | 🗑 Alle Schüsse löschen | löscht alle Schüsse in `pc\shots` (Clips, Daten, Linien); fertige Videos in `pc\exports` bleiben |
 | Einstellungen | Clip-Länge und R10-Verzögerung (Kalibrierung) |
 
-Rechts: Ball- und Schlägerdaten (km/h), Smash, Face-to-Path, Video-Infos, **Video mit Schlagdaten**
+Rechts: Ball- und Schlägerdaten (mph, Carry in m), Smash, Face-to-Path, Video-Infos, **Video mit Schlagdaten**
 (Download / Neu erstellen), Notiz, Durchschnitt pro Schläger.
 
 ### Kalibrierung der R10-Verzögerung
@@ -163,7 +163,7 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
 
 - **Zeitlupe 1/8** (jedes 240-fps-Bild sichtbar), Format wie aufgenommen (quer/hochkant)
 - **Schwarzweiß und aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
-- **Datenpanel** (quer: kompakt oben links, damit Ball und Schlägerkopf frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit, Schlägerkopf (km/h), Smash, Abflugwinkel,
+- **Datenpanel** (quer: kompakt oben links, damit Ball und Schlägerkopf frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit und Schlägerkopf (mph), Carry vom Garmin (m), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
 - **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
   verlängert bis zum Bildrand (Schwungebene)
@@ -233,10 +233,14 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 4. **Synchron:** grob über das gleichzeitige Startsignal, danach genau über den Treffmoment in beiden Videos
    (auf ein Bild = 4 ms). Die Analyse-Seite zeigt beide Videos nebeneinander; Abspielen, Pause, Bild für Bild,
    Spulen und Zeitlupe steuern beide.
-5. **Von Hand nachstellen:** In der Leiste unter dem Video „Seite −1F / +1F“ verschiebt das Seitenvideo um je ein
+5. **Linien seitlich:** Im Seitenvideo werden ebenfalls die Schaftlinie beim **Ansprechen** und kurz vor dem
+   **Treffmoment** erkannt. Oben links steht der Winkel zur Waagrechten und beim Treffmoment die Veränderung
+   gegenüber dem Ansprechen (z. B. „Treffmoment 65° (+6° ggü. Ansprechen)“; + = Schaft im Bild gegen den
+   Uhrzeigersinn gedreht).
+6. **Von Hand nachstellen:** In der Leiste unter dem Video „Seite −1F / +1F“ verschiebt das Seitenvideo um je ein
    Bild (wird am Schuss gespeichert und von der Automatik nicht mehr überschrieben), „auto“ stellt den
    automatischen Wert wieder her. Daneben steht der aktuelle Versatz und wie er ermittelt wurde.
-6. Linien, Analyse und Export-Video gibt es nur für die Kamera hinten.
+7. Das Export-Video (`pc\exports\`) zeigt weiterhin nur die Kamera hinten.
 
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.

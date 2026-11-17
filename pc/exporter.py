@@ -1,5 +1,5 @@
 """
-Export: Clip + eingeblendete Schlagdaten (km/h) als fertiges MP4 in pc\\exports\\.
+Export: Clip + eingeblendete Schlagdaten (mph, Carry in m) als fertiges MP4 in pc\\exports\\.
 
 Laeuft im Hintergrund, sobald ein Clip vom Handy angekommen ist. Das Video wird als Zeitlupe
 gerendert, sodass jedes 240-fps-Bild einzeln sichtbar ist (240 fps -> 30 fps = 1/8 Tempo).
@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 7
+EXPORT_VERSION = 8
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -153,12 +153,25 @@ def _deg(v, lr=False):
     return s + "°"
 
 
+YARD_TO_M = 0.9144
+
+
+def carry_m(payload):
+    """Carry vom Garmin/Connector in Metern (BallData.CarryDistance in 'Units', meist Yards) oder None."""
+    pl = payload or {}
+    v = (pl.get("BallData") or {}).get("CarryDistance")
+    if not isinstance(v, (int, float)) or v <= 0:
+        return None
+    return v * YARD_TO_M if str(pl.get("Units", "Yards")).lower().startswith("yard") else float(v)
+
+
 def shot_rows(payload):
     """Werte fuer die Einblendung (links/rechts je Liste von (Bezeichnung, Wert))."""
     b = (payload or {}).get("BallData") or {}
     c = (payload or {}).get("ClubData") or {}
     bs, cs = b.get("Speed"), c.get("Speed")
-    kmh = lambda v: f"{_num(float(v) * MPH_TO_KMH)} km/h" if isinstance(v, (int, float)) and v else "–"
+    mph = lambda v: f"{_num(float(v))} mph" if isinstance(v, (int, float)) and v else "–"
+    carry = carry_m(payload)
     smash = _num(bs / cs, 2) if isinstance(bs, (int, float)) and isinstance(cs, (int, float)) and cs else None
     spin = b.get("TotalSpin")
     # Der R10-Connector liefert Face-to-Path nicht (immer 0) -> aus Face to Target - Path berechnen
@@ -166,14 +179,15 @@ def shot_rows(payload):
     if (not ftp) and isinstance(c.get("FaceToTarget"), (int, float)) and isinstance(c.get("Path"), (int, float)):
         ftp = c["FaceToTarget"] - c["Path"]
     left = [
-        ("Ballgeschw.", kmh(bs)),
-        ("Schlägerkopf", kmh(cs)),
+        ("Ballgeschw.", mph(bs)),
+        ("Schlägerkopf", mph(cs)),
         ("Smash", smash or "–"),
         ("Abflugwinkel", _deg(b.get("VLA"))),
         ("Richtung", _deg(b.get("HLA"), lr=True)),
         ("Spin", f"{int(round(spin))} rpm" if isinstance(spin, (int, float)) else "–"),
     ]
     right = [
+        ("Carry", f"{_num(carry)} m" if carry else "–"),
         ("Spinachse", _deg(b.get("SpinAxis"))),
         ("AoA", _deg(c.get("AngleOfAttack"))),
         ("Club Path", _deg(c.get("Path"))),
@@ -196,7 +210,7 @@ def export_name(shot_id, record):
             parts.append(str(record["club"]))
         bs = ((record.get("payload") or {}).get("BallData") or {}).get("Speed")
         if isinstance(bs, (int, float)) and bs:
-            parts.append(f"{bs * MPH_TO_KMH:.0f}kmh")
+            parts.append(f"{bs:.0f}mph")
     name = "_".join(parts)
     return "".join(ch for ch in name if ch.isalnum() or ch in "-_") + ".mp4"
 
@@ -229,6 +243,40 @@ class Exporter:
             log.info("FFmpeg: %s", self.ffmpeg)
         else:
             log.warning("FFmpeg nicht gefunden - kein Video-Export mit Schlagdaten (winget install Gyan.FFmpeg)")
+
+    def process_side(self, sid):
+        """Seitenkamera: synchronisieren und Ansprech-/Treffmoment-Linie erkennen (einmal pro Clip)."""
+        try:
+            if not os.path.exists(self.store.path(sid, "clip_side.mp4")):
+                return
+        except ValueError:
+            return
+        if (self.store.read_json(sid, "sync.json") or {}).get("method") not in ("treffmoment", "manuell"):
+            self.sync_side(sid)
+        notes = self.store.read_json(sid, "notes.json") or {}
+        if "side_analysis" in notes or not self.cfg.data.get("auto_analysis", True):
+            return
+        try:
+            import swing_analysis
+            if not swing_analysis.AVAILABLE:
+                return
+            vs = self.store.read_json(sid, "video_side.json") or {}
+            # Seitenansicht: Schaft steht steiler -> bis fast senkrecht zulassen; nur die letzten 5 s lesen
+            res = swing_analysis.analyze(self.store.path(sid, "clip_side.mp4"), vs.get("trigger_time"),
+                                         max_ang=89.5, window=5.0, labels=("Ansprechen", "Treffmoment"))
+        except Exception as e:
+            log.exception("Analyse Seitenkamera %s fehlgeschlagen", sid)
+            res = {"error": str(e)[:200]}
+        notes = self.store.read_json(sid, "notes.json") or {}      # frisch lesen
+        notes["side_analysis"] = {k: v for k, v in res.items() if k != "lines"}
+        if "error" not in res:
+            manual = [l for l in notes.get("side_lines") or [] if not l.get("auto")]
+            have = {l.get("label") for l in manual}
+            notes["side_lines"] = manual + [l for l in res.get("lines", []) if l["label"] not in have]
+        self.store.write_json(sid, "notes.json", notes)
+        why = "; ".join(str(res[k]) for k in ("error", "address_error", "downswing_error") if res.get(k))
+        log.info("Analyse Seitenkamera %s: Linien: %s%s", sid,
+                 ", ".join(l["label"] for l in res.get("lines", [])) or "keine", f" ({why})" if why else "")
 
     def sync_side(self, sid):
         """
@@ -357,6 +405,12 @@ class Exporter:
             if wait > 0:
                 time.sleep(wait)
             self.busy = sid
+            if sid.startswith("side:"):                # nur Seitenkamera: synchronisieren + Linien
+                try:
+                    self.process_side(sid[5:])
+                finally:
+                    self.busy = None
+                continue
             try:
                 self.export(sid)
             except Exception as e:
@@ -551,10 +605,9 @@ class Exporter:
                             pass
                     self.store.reject(sid, reason)
                     return
-        # Seitenkamera auf den (jetzt bekannten) Treffmoment hinten genau einrasten
-        if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")) and \
-                (self.store.read_json(sid, "sync.json") or {}).get("method") not in ("treffmoment", "manuell"):
-            self.sync_side(sid)
+        # Seitenkamera auf den (jetzt bekannten) Treffmoment hinten genau einrasten, Linien erkennen
+        if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")):
+            self.process_side(sid)
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         addr = (notes.get("analysis") or {}).get("address_time")
