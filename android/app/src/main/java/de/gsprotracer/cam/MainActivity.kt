@@ -76,6 +76,8 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         link = PcLink(this)
         link.host = prefs.getString("host", "") ?: ""
         link.uploadPort = prefs.getInt("upload_port", 8090)
+        link.role = prefs.getString("role", "hinten") ?: "hinten"
+        updateRoleButton()
         link.start(clipDir)
 
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -147,6 +149,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             this.text = text; isAllCaps = false; setOnClickListener { onClick() }
         }.also { bar.addView(it) }
         button("Verbinden") { applyHost() }
+        btnRole = button("Kamera: hinten") { toggleRole() }
         button("Testclip") { onTrigger("test-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()), 2.0, 1.0, 0.0) }
         btnOrient = button("") { toggleOrientation() }
         btnRotate = button("Drehung") { cycleRotation() }
@@ -168,6 +171,21 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         link.reconnect()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(ipField.windowToken, 0)
         ipField.clearFocus()
+    }
+
+    private lateinit var btnRole: Button
+
+    /** Zwei Handys: eins hinten (Linien, Analyse), eins seitlich im 90-Grad-Winkel. */
+    private fun toggleRole() {
+        val r = if (link.role == "hinten") "seitlich" else "hinten"
+        prefs.edit().putString("role", r).apply()
+        link.role = r
+        updateRoleButton()
+        link.send(statusJson().put("type", "hello"))      // PC sofort informieren
+    }
+
+    private fun updateRoleButton() {
+        if (::btnRole.isInitialized && ::link.isInitialized) btnRole.text = "Kamera: ${link.role}"
     }
 
     private lateinit var btnOrient: Button
@@ -490,5 +508,6 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             .put("pending", link.pendingCount())
             .put("camera_info", recorder.cameraInfo)
             .put("format", if (isPortrait()) "hochkant" else "quer")
+            .put("role", if (::link.isInitialized) link.role else "hinten")
     }
 }

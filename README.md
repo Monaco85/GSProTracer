@@ -113,6 +113,7 @@ PC und Handy müssen im **selben WLAN** sein.
 |---|---|
 | Verbinden | Verbindung zur eingetragenen PC-IP |
 | Testclip | 3-s-Clip ohne R10 (zum Testen/Ausrichten) |
+| Kamera: hinten / seitlich | Rolle bei zwei Handys: **hinten** (Down-the-Line, Linien und Analyse) oder **seitlich** (90°, Face-On) |
 | Format: quer / hochkant | Ausrichtung der Aufnahme (Standard: quer) |
 | Modus: 240 fps / 720p ↔ 120 fps / 1080p | 1080p kann einen größeren Bildausschnitt haben |
 | Weitwinkel | nur sichtbar, wenn das Handy Zoom < 1× für Fremd-Apps anbietet |
@@ -207,6 +208,8 @@ sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerte
 | `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
 | `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
 | `export_trim` | true | Export ab kurz vor dem Rückschwung (siehe `export_lead_seconds`) bis 0,6 s nach dem Treffen |
+| `clip_orientation_side` | "" | Videolage der Seitenkamera (wie `clip_orientation`; leer = wie aufgenommen) |
+| `camera_roles` | {} | nur für alte Apps: Rolle je IP, z. B. `{"192.168.1.163": "seitlich"}` |
 | `export_lead_seconds` | 0,15 | Vorlauf im Export: so lange (Echtzeit) wird die Ansprechposition vor dem Rückschwung gezeigt; in Zeitlupe 1/8 ×8 |
 | `only_complete_shots` | true | Schuss nur behalten, wenn Treffmoment, Ansprechlinie und Schlaglinie erkannt wurden (Testclips immer). Verworfene Schüsse landen in `pc\verworfen\` (die letzten 30, mit `verworfen.txt` = Grund) |
 | `auto_analysis` | true | Treffmoment + Linien automatisch |
@@ -216,6 +219,22 @@ Ordner pro Schlag: `pc\shots\<JJJJMMTT-hhmmss-nn>\` mit `clip.mp4` (Original 240
 (Daten vom Connector + Schläger aus GSPro), `video.json`, `notes.json` (Notiz, Treffmoment, Linien), `export.json`.
 
 ---
+
+### Zwei Kameras (hinten + seitlich)
+
+Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) mitfilmen:
+
+1. App auf dem zweiten Handy installieren, gleiche PC-IP eintragen, Knopf **„Kamera: seitlich“** wählen.
+   Das erste Handy bleibt auf **„Kamera: hinten“**. Oben auf der Analyse-Seite stehen dann beide.
+2. Ausrichten: Seite **Kamera ausrichten** → oben zwischen **hinten** und **seitlich** umschalten.
+3. Bei jedem Schlag nehmen beide auf. Die Seitenkamera wird als `clip_side.mp4` im selben Schuss gespeichert.
+4. **Synchron:** grob über das gleichzeitige Startsignal, danach genau über den Treffmoment in beiden Videos
+   (auf ein Bild = 4 ms). Die Analyse-Seite zeigt beide Videos nebeneinander; Abspielen, Pause, Bild für Bild,
+   Spulen und Zeitlupe steuern beide.
+5. Linien, Analyse und Export-Video gibt es nur für die Kamera hinten.
+
+Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
+kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.
 
 ## 6. Kamera-Aufbau, Licht, Weitwinkel
 

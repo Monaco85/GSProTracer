@@ -230,6 +230,45 @@ class Exporter:
         else:
             log.warning("FFmpeg nicht gefunden - kein Video-Export mit Schlagdaten (winget install Gyan.FFmpeg)")
 
+    def sync_side(self, sid):
+        """
+        Seitenkamera mit der Kamera hinten synchronisieren -> sync.json {"offset": Sekunden}.
+        Zeit im Video hinten = Zeit im Seitenvideo + offset.
+        1. grob: beide Handys bekommen das Startsignal gleichzeitig (Fehler = WLAN-Laufzeit, wenige ms)
+        2. fein: Treffmoment in beiden Videos (auf ein Bild = 4 ms genau), wenn er zur groben Schaetzung passt
+        """
+        try:
+            side = self.store.path(sid, "clip_side.mp4")
+            if not os.path.exists(side):
+                return None
+            vb = self.store.read_json(sid, "video.json") or {}
+            vs = self.store.read_json(sid, "video_side.json") or {}
+            if vb.get("trigger_time") is None or vs.get("trigger_time") is None:
+                return None
+            trig_off = float(vb["trigger_time"]) - float(vs["trigger_time"])
+            res = {"offset": round(trig_off, 4), "method": "startsignal", "trigger_offset": round(trig_off, 4)}
+            notes = self.store.read_json(sid, "notes.json") or {}
+            ib = notes.get("impact_time")
+            if ib is None:
+                ib = (notes.get("analysis") or {}).get("impact_time")
+            if ib is not None:
+                try:
+                    import swing_analysis
+                    i_side = swing_analysis.impact_in_window(side, float(vs["trigger_time"]))
+                except Exception:
+                    i_side = None
+                if i_side is not None:
+                    off = float(ib) - i_side
+                    if abs(off - trig_off) < 0.25:          # passt zur groben Schaetzung -> genauer Wert
+                        res.update(offset=round(off, 4), method="treffmoment", impact_side=i_side)
+            self.store.write_json(sid, "sync.json", res)
+            log.info("Seitenkamera %s synchronisiert: Versatz %+.3f s (%s)", sid, res["offset"],
+                     "per Treffmoment" if res["method"] == "treffmoment" else "per Startsignal")
+            return res
+        except Exception:
+            log.exception("Synchronisieren %s fehlgeschlagen", sid)
+            return None
+
     def _pick_encoder(self):
         """Grafikkarten-Encoder suchen (Probe-Kodierung von 10 Bildern), sonst Prozessor (libx264)."""
         want = str(self.cfg.data.get("export_encoder", "auto") or "auto")
@@ -510,6 +549,10 @@ class Exporter:
                             pass
                     self.store.reject(sid, reason)
                     return
+        # Seitenkamera auf den (jetzt bekannten) Treffmoment hinten genau einrasten
+        if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")) and \
+                (self.store.read_json(sid, "sync.json") or {}).get("method") != "treffmoment":
+            self.sync_side(sid)
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         addr = (notes.get("analysis") or {}).get("address_time")

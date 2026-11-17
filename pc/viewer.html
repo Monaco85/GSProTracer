@@ -23,8 +23,13 @@ main{display:grid;grid-template-columns:280px 1fr 300px;gap:0;height:calc(100vh 
 .shot .t{color:var(--muted);font-size:12px} .shot .v{font-variant-numeric:tabular-nums}
 .shot .nv{color:var(--warn);font-size:11px}
 #center{display:flex;flex-direction:column;min-width:0;padding:12px;gap:8px}
-#stage{position:relative;flex:1;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-#stage video{max-width:100%;max-height:100%;display:block}
+#stages{flex:1;min-height:0;display:flex;gap:8px}
+#stage,#stage2{position:relative;flex:1;min-width:0;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+#stage2{display:none}
+#stages.two #stage2{display:flex}
+#stage video,#stage2 video{max-width:100%;max-height:100%;display:block}
+.camlbl{position:absolute;left:8px;top:6px;font-size:11px;color:#fff;background:#0009;padding:2px 7px;border-radius:99px;pointer-events:none;z-index:2;display:none}
+#stages.two .camlbl{display:block}
 #stage canvas{position:absolute;cursor:crosshair}
 #empty{color:var(--muted);position:absolute}
 #bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -41,7 +46,7 @@ textarea{width:100%;min-height:60px;background:var(--panel2);color:var(--text);b
 .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:520px}
 dialog::backdrop{background:#0008}
-@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}#list{max-height:220px}#stage{min-height:300px}}
+@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}#list{max-height:220px}#stage,#stage2{min-height:300px}#stages{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -61,7 +66,10 @@ dialog::backdrop{background:#0008}
 <main>
   <div id="list"></div>
   <div id="center">
-    <div id="stage"><div id="empty">Noch kein Schuss ausgewählt</div><video id="vid" playsinline muted preload="auto"></video><canvas id="cv"></canvas></div>
+    <div id="stages">
+      <div id="stage"><span class="camlbl">hinten</span><div id="empty">Noch kein Schuss ausgewählt</div><video id="vid" playsinline muted preload="auto"></video><canvas id="cv"></canvas></div>
+      <div id="stage2"><span class="camlbl" id="lblSide">seitlich</span><video id="vid2" playsinline muted preload="auto"></video></div>
+    </div>
     <div id="tl"><div class="prog" id="prog"></div></div>
     <div id="bar">
       <button id="bPlay" title="Leertaste">▶</button>
@@ -104,6 +112,8 @@ dialog::backdrop{background:#0008}
   <div class="row"><label style="width:220px">Videolage</label><select id="cOrient">
     <option value="quer_180">quer, 180° gedreht</option><option value="quer">quer</option>
     <option value="">wie aufgenommen</option></select></div>
+  <div class="row"><label style="width:220px">Videolage Seitenkamera</label><select id="cOrientSide">
+    <option value="">wie aufgenommen</option><option value="quer">quer</option><option value="quer_180">quer, 180° gedreht</option></select></div>
   <div class="row small" style="opacity:.7">Steht das Video auf dem Kopf, hier umstellen – alle Clips werden verlustfrei gedreht, Linien und Videos neu erstellt.</div>
   <h3>Kalibrierung</h3>
   <p class="small">Bei einigen Schüssen den Treffmoment mit „Impact hier“ markieren. Daraus wird die R10-Verzögerung berechnet.</p>
@@ -114,7 +124,7 @@ dialog::backdrop{background:#0008}
 
 <script>
 const $ = s => document.querySelector(s);
-const vid = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
+const vid = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d'), vid2 = $('#vid2');
 let shots = [], cur = null, lastSeenId = null, rate = 0.25, lines = {}, drag = null, cfg = {};
 const RATES = [1, 0.5, 0.25, 0.125, 0.0625];
 
@@ -141,21 +151,30 @@ async function poll() {
     cfg = st.config;
     // gleiche Aufhellung wie im Export-Video (export_brightness)
     const br = +(cfg.export_brightness || 0);
-    vid.style.filter = (cfg.export_monochrome ? 'grayscale(1) ' : '') + (br > 0 ? `brightness(${(1 + 0.55 * br).toFixed(2)}) contrast(1.05)` : '');
+    vid.style.filter = vid2.style.filter = (cfg.export_monochrome ? 'grayscale(1) ' : '') + (br > 0 ? `brightness(${(1 + 0.55 * br).toFixed(2)}) contrast(1.05)` : '');
     const p = $('#stProxy');
     p.textContent = st.proxy_connected ? 'Connector ✓' : 'Connector nicht verbunden';
     p.className = 'pill ' + (st.proxy_connected ? 'ok' : 'warn');
     const ph = $('#stPhone');
     if (st.phones.length) {
-      const s = st.phones[0].status || {};
-      const t = s.temp ? ` · ${fmt(s.temp, 0)} °C` : '';
-      ph.textContent = `Handy ✓ ${s.fps || '?'} fps${t}${s.pending ? ' · ' + s.pending + ' Upload(s) offen' : ''}`;
-      ph.className = 'pill ' + ((s.fps && !s.high_speed) || (s.temp && s.temp >= 43) ? 'warn' : 'ok');
-      ph.title = s.camera_info || '';
+      const parts = [], roles = [];
+      let warn = false;
+      for (const p of st.phones) {
+        const s = p.status || {};
+        const role = s.role || (cfg.camera_roles || {})[p.addr] || 'hinten';
+        roles.push(role);
+        const t = s.temp ? ` ${fmt(s.temp, 0)}°C` : '';
+        parts.push(`${role} ✓ ${s.fps || '?'} fps${t}${s.pending ? ' · ' + s.pending + ' offen' : ''}`);
+        warn = warn || (s.fps && !s.high_speed) || (s.temp && s.temp >= 43);
+      }
+      const dup = roles.length > 1 && new Set(roles).size < roles.length;
+      ph.textContent = (dup ? '⚠ beide Handys auf „' + roles[0] + '“ · ' : '') + parts.join(' · ');
+      ph.className = 'pill ' + (dup || warn ? 'warn' : 'ok');
+      ph.title = st.phones.map(p => `${p.addr}: ${(p.status || {}).camera_info || ''}`).join('\n');
     } else { ph.textContent = 'Handy nicht verbunden'; ph.className = 'pill bad'; }
     $('#stClub').textContent = st.player && st.player.Club ? 'Schläger: ' + st.player.Club : '–';
 
-    const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.notes.impact_time, s.export && (s.export.file || s.export.error)]));
+    const sig = JSON.stringify(list.map(s => [s.id, s.has_video, s.has_side, s.sync && s.sync.offset, s.notes.impact_time, s.export && (s.export.file || s.export.error)]));
     if (sig !== poll.sig) {
       poll.sig = sig; shots = list; renderList(); renderStats();
       const newest = list[0];
@@ -163,7 +182,7 @@ async function poll() {
         select(newest.id, true);
       }
       if (newest && newest.has_video) lastSeenId = newest.id;
-      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video)) select(u.id); else if (u) { cur = u; renderExport(); } }
+      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video || u.has_side !== cur.has_side)) select(u.id); else if (u) { cur = u; renderExport(); } }
       poll.init = true;
     }
   } catch (e) { console.error('Anzeigefehler', e); }
@@ -229,8 +248,42 @@ function select(id, autoplay) {
       if (autoplay) vid.play();
     };
   } else { vid.removeAttribute('src'); vid.load(); }
+  const two = !!(cur.has_side && cur.has_video);
+  $('#stages').classList.toggle('two', two);
+  if (two) {
+    const vs = cur.video_side || {};
+    vid2.src = `/shots/${id}/clip_side.mp4?v=${vs.bytes || 0}`;
+    vid2.onloadedmetadata = () => { fitCanvas(); syncSide(); };
+  } else { vid2.removeAttribute('src'); vid2.load(); }
+  requestAnimationFrame(fitCanvas);
   draw();
 }
+
+// ---------------------------------------------------------------- zweite Kamera (seitlich) synchron
+// Zeit hinten = Zeit seitlich + offset (sync.json: Treffmoment bzw. Startsignal)
+function sideOffset() {
+  if (!cur) return 0;
+  if (cur.sync && typeof cur.sync.offset === 'number') return cur.sync.offset;
+  const a = cur.video && cur.video.trigger_time, b = cur.video_side && cur.video_side.trigger_time;
+  return (typeof a === 'number' && typeof b === 'number') ? a - b : 0;
+}
+function syncSide() {
+  if (!cur || !cur.has_side || !vid2.src || !(vid2.readyState >= 1)) return;
+  const t = vid.currentTime - sideOffset();
+  const inRange = t >= 0 && t <= (vid2.duration || 0);
+  vid2.playbackRate = vid.playbackRate;
+  if (vid.paused || !inRange) {
+    if (!vid2.paused) vid2.pause();
+    const tt = Math.min(Math.max(t, 0), vid2.duration || 0);
+    if (Math.abs(vid2.currentTime - tt) > 0.001) vid2.currentTime = tt;
+    return;
+  }
+  // beim Abspielen nur nachstellen, wenn mehr als ~2 Bilder auseinander (sonst ruckelt es)
+  if (Math.abs(vid2.currentTime - t) > 0.009) vid2.currentTime = t;
+  if (vid2.paused) vid2.play().catch(() => {});
+}
+['play', 'pause', 'seeked', 'seeking', 'ratechange', 'timeupdate'].forEach(ev => vid.addEventListener(ev, syncSide));
+vid.addEventListener('play', () => { const f = () => { syncSide(); if (!vid.paused && !vid.ended) requestAnimationFrame(f); }; f(); });
 
 function renderExport() {
   const el = $('#exInfo');
@@ -364,7 +417,7 @@ $('#bClear').onclick = async () => { if (cur && confirm('Alle Linien dieses Schl
 
 // ---------------------------------------------------------------- settings dialog
 $('#btnSettings').onclick = async () => {
-  $('#cPre').value = cfg.clip_pre_seconds; $('#cPost').value = cfg.clip_post_seconds; $('#cDelay').value = cfg.trigger_delay_seconds; $('#cOrient').value = cfg.clip_orientation ?? 'quer_180'; $('#cLead').value = cfg.export_lead_seconds ?? 0.15;
+  $('#cPre').value = cfg.clip_pre_seconds; $('#cPost').value = cfg.clip_post_seconds; $('#cDelay').value = cfg.trigger_delay_seconds; $('#cOrient').value = cfg.clip_orientation ?? 'quer_180'; $('#cOrientSide').value = cfg.clip_orientation_side ?? ''; $('#cLead').value = cfg.export_lead_seconds ?? 0.15;
   const c = await (await fetch('/api/calibration')).json();
   $('#calib').textContent = c.samples ? `${c.samples} markierte Schüsse → R10-Verzögerung ≈ ${fmt(c.suggested_delay, 2)} s (Streuung ${fmt(c.min, 2)}–${fmt(c.max, 2)} s)` : 'Noch keine markierten Schüsse.';
   $('#bApplyCal').disabled = !c.samples;
@@ -373,7 +426,7 @@ $('#btnSettings').onclick = async () => {
 };
 $('#bCancel').onclick = () => $('#dlg').close();
 $('#bSave').onclick = async () => {
-  cfg = await (await fetch('/api/config', { method: 'POST', body: JSON.stringify({ clip_pre_seconds: +$('#cPre').value, clip_post_seconds: +$('#cPost').value, trigger_delay_seconds: +$('#cDelay').value, clip_orientation: $('#cOrient').value, export_lead_seconds: +$('#cLead').value }) })).json();
+  cfg = await (await fetch('/api/config', { method: 'POST', body: JSON.stringify({ clip_pre_seconds: +$('#cPre').value, clip_post_seconds: +$('#cPost').value, trigger_delay_seconds: +$('#cDelay').value, clip_orientation: $('#cOrient').value, clip_orientation_side: $('#cOrientSide').value, export_lead_seconds: +$('#cLead').value }) })).json();
   poll.sig = null;
   $('#dlg').close();
 };

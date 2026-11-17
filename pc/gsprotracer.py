@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-15g (Schwarzweiss, Ansprech-/Schlaglinie, kurzer Vorlauf, GSPro-Diagnose, Grafikkarten-Export)"
+VERSION = "2026-11-17 (zwei Kameras: hinten + seitlich synchron)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -64,6 +64,8 @@ DEFAULT_CONFIG = {
     "export_preset": "medium",         # x264-Preset bei Prozessor-Export (slow = etwas kleiner, dauert laenger)
     "export_brightness": 1.0,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
     "export_monochrome": True,         # Schwarzweiss: Schwung klarer, farbige Linien heben sich ab
+    "clip_orientation_side": "",       # Videolage der Seitenkamera (quer / quer_180 / "" = wie aufgenommen)
+    "camera_roles": {},                # nur fuer alte Apps ohne Rollen-Knopf: {"IP-Adresse": "hinten"|"seitlich"}
     "clip_orientation": "quer_180",    # Clips verlustfrei drehen: quer = Sensorbild, quer_180 = auf dem Kopf
                                        # (Handy andersherum), "" = so lassen wie aufgenommen
     "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
@@ -131,7 +133,7 @@ class Config:
     def update(self, values):
         with self.lock:
             for k, v in values.items():
-                if k == "clip_orientation":
+                if k in ("clip_orientation", "clip_orientation_side"):
                     if v in ("quer", "quer_180", ""):
                         self.data[k] = v
                 elif k in DEFAULT_CONFIG and k.startswith(("clip_", "trigger_")) or k == "export_lead_seconds":
@@ -200,6 +202,9 @@ class ShotStore:
             "notes": self.read_json(shot_id, "notes.json") or {},
             "export": self.read_json(shot_id, "export.json"),
             "has_video": os.path.exists(self.path(shot_id, "clip.mp4")),
+            "has_side": os.path.exists(self.path(shot_id, "clip_side.mp4")),
+            "video_side": self.read_json(shot_id, "video_side.json"),
+            "sync": self.read_json(shot_id, "sync.json"),
         }
 
     def list(self):
@@ -560,9 +565,7 @@ class TracerApp:
         self._last_shot_key, self._last_shot_at = None, 0.0
         # Live-Bild vom Handy (nur solange die Live-Seite offen ist)
         self.preview_lock = threading.Lock()
-        self.preview_jpeg = None
-        self.preview_at = 0.0
-        self.preview_frames = []      # Zeitstempel der letzten Bilder -> fps
+        self.previews = {}            # Kamera ("hinten"/"seitlich") -> letztes Bild, Zeitpunkt, fps
         self.preview_keepalive = 0.0
 
     def request_preview(self):
@@ -572,17 +575,19 @@ class TracerApp:
             self.preview_keepalive = now
             self.hub.broadcast({"type": "preview", "upload_port": self.cfg["http_port"]})
 
-    def store_preview(self, jpeg):
+    def store_preview(self, jpeg, cam="hinten"):
         now = time.time()
         with self.preview_lock:
-            self.preview_jpeg = jpeg
-            self.preview_at = now
-            self.preview_frames = [t for t in self.preview_frames if now - t < 2.0] + [now]
+            p = self.previews.setdefault(cam, {"jpeg": None, "at": 0.0, "frames": []})
+            p["jpeg"], p["at"] = jpeg, now
+            p["frames"] = [t for t in p["frames"] if now - t < 2.0] + [now]
 
-    def preview_fps(self):
+    def get_preview(self, cam="hinten"):
+        """(jpeg, zeitpunkt, fps) des letzten Live-Bilds dieser Kamera."""
         with self.preview_lock:
-            f = [t for t in self.preview_frames if time.time() - t < 2.0]
-        return round(len(f) / 2.0, 1)
+            p = self.previews.get(cam) or {"jpeg": None, "at": 0.0, "frames": []}
+            f = [t for t in p["frames"] if time.time() - t < 2.0]
+            return p["jpeg"], p["at"], round(len(f) / 2.0, 1)
 
     def handle_gspro_msg(self, obj):
         if obj.get("Code") == 201 and isinstance(obj.get("Player"), dict):
@@ -669,8 +674,18 @@ class TracerApp:
         """
         from exporter import fix_orientation
         mode = self.cfg.data.get("clip_orientation", "quer_180")
+        mode_side = self.cfg.data.get("clip_orientation_side", "")
         changed = []
         for s in self.store.list():
+            if s.get("has_side"):          # Seitenkamera: nur drehen (keine Linien, kein Export)
+                try:
+                    new = fix_orientation(self.exporter.ffmpeg, self.store.path(s["id"], "clip_side.mp4"), mode_side)
+                    if new:
+                        vs = self.store.read_json(s["id"], "video_side.json") or {}
+                        vs["width"], vs["height"] = new
+                        self.store.write_json(s["id"], "video_side.json", vs)
+                except Exception:
+                    log.exception("Drehen Seitenkamera %s fehlgeschlagen", s["id"])
             if not s["has_video"]:
                 continue
             sid = s["id"]
@@ -797,8 +812,8 @@ def make_handler(app: TracerApp):
                         return self.send_text(f.read(), ctype="text/html; charset=utf-8")
                 if p == "/api/preview.jpg":
                     app.request_preview()
-                    with app.preview_lock:
-                        jpeg, at = app.preview_jpeg, app.preview_at
+                    cam = parse_qs(urlparse(self.path).query).get("cam", ["hinten"])[0]
+                    jpeg, at, pfps = app.get_preview(cam)
                     if not jpeg or time.time() - at > 3.0:
                         return self.send_text("kein Live-Bild", 503)
                     self.send_response(200)
@@ -806,7 +821,7 @@ def make_handler(app: TracerApp):
                     self.send_header("Content-Length", str(len(jpeg)))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("X-Frame-Age", f"{time.time() - at:.3f}")
-                    self.send_header("X-Preview-Fps", str(app.preview_fps()))
+                    self.send_header("X-Preview-Fps", str(pfps))
                     self.end_headers()
                     self.wfile.write(jpeg)
                     return
@@ -818,9 +833,9 @@ def make_handler(app: TracerApp):
                     return self.send_json(app.calibration())
                 if p == "/api/export.csv":
                     return self.send_csv()
-                m = re.match(r"^/shots/([A-Za-z0-9_-]+)/clip\.mp4$", p)
+                m = re.match(r"^/shots/([A-Za-z0-9_-]+)/(clip|clip_side)\.mp4$", p)
                 if m:
-                    return self.send_video(app.store.path(m.group(1), "clip.mp4"))
+                    return self.send_video(app.store.path(m.group(1), m.group(2) + ".mp4"))
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export\.mp4$", p)
                 if m:
                     ex = app.store.read_json(m.group(1), "export.json") or {}
@@ -913,17 +928,20 @@ def make_handler(app: TracerApp):
                 if u.path == "/api/upload":
                     return self.handle_upload(q)
                 if u.path == "/api/preview":
-                    app.store_preview(self.read_body(limit=3_000_000))
+                    cam = parse_qs(u.query).get("cam", [""])[0]
+                    if cam not in ("hinten", "seitlich"):
+                        cam = (app.cfg.data.get("camera_roles") or {}).get(self.client_address[0], "hinten")
+                    app.store_preview(self.read_body(limit=3_000_000), cam)
                     return self.send_json({"ok": True})
                 if u.path == "/api/trigger":
                     self.read_body()
                     sid = app.handle_shot({}, test=True)
                     return self.send_json({"shot_id": sid})
                 if u.path == "/api/config":
-                    before = app.cfg.data.get("clip_orientation")
+                    before = (app.cfg.data.get("clip_orientation"), app.cfg.data.get("clip_orientation_side"))
                     lead_before = app.cfg.data.get("export_lead_seconds")
                     app.cfg.update(json.loads(self.read_body() or b"{}"))
-                    if app.cfg.data.get("clip_orientation") != before:
+                    if (app.cfg.data.get("clip_orientation"), app.cfg.data.get("clip_orientation_side")) != before:
                         threading.Thread(target=app.reorient_all, args=(True,), daemon=True).start()
                     elif app.cfg.data.get("export_lead_seconds") != lead_before:
                         for s in app.store.list():          # neuer Vorlauf -> Videos neu zuschneiden
@@ -963,8 +981,27 @@ def make_handler(app: TracerApp):
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0 or length > 2_000_000_000:
                 return self.send_text("bad length", 400)
-            os.makedirs(app.store.path(sid), exist_ok=True)
-            tmp = app.store.path(sid, "clip.mp4.part")
+            ip = self.client_address[0]
+            # Rolle: von der App (ab Build 10), sonst per IP aus config.json camera_roles, sonst "hinten"
+            cam = q.get("cam", "")
+            if cam not in ("hinten", "seitlich"):
+                cam = (app.cfg.data.get("camera_roles") or {}).get(ip, "hinten")
+            base = app.store.path(sid)
+            if cam == "hinten" and os.path.exists(os.path.join(base, "clip.mp4")):
+                old_ip = (app.store.read_json(sid, "video.json") or {}).get("ip")
+                if old_ip and old_ip != ip:
+                    log.warning("Zwei Handys stehen auf 'Kamera: hinten' (%s und %s) - dieses Video wird als "
+                                "Seitenkamera gespeichert. In der App bei einem Handy 'Kamera: seitlich' waehlen.",
+                                old_ip, ip)
+                    cam = "seitlich"
+            side = cam == "seitlich"
+            if side and not os.path.isdir(base):
+                rej = os.path.join(app.store.rejected_dir, sid)   # Schuss schon verworfen -> dazulegen
+                if os.path.isdir(rej):
+                    base = rej
+            clip_name, meta_name = ("clip_side.mp4", "video_side.json") if side else ("clip.mp4", "video.json")
+            os.makedirs(base, exist_ok=True)
+            tmp = os.path.join(base, clip_name + ".part")
             remaining = length
             with open(tmp, "wb") as f:
                 while remaining > 0:
@@ -976,7 +1013,8 @@ def make_handler(app: TracerApp):
             if remaining:
                 os.remove(tmp)
                 return self.send_text("incomplete", 400)
-            os.replace(tmp, app.store.path(sid, "clip.mp4"))
+            clip = os.path.join(base, clip_name)
+            os.replace(tmp, clip)
 
             def f(key, default=None):
                 try:
@@ -994,29 +1032,43 @@ def make_handler(app: TracerApp):
                 "trigger_time": f("trigger"),   # Sekunde im Clip, an der der Trigger ankam
                 "delay_used": f("delay", 0.0),
                 "device": q.get("device", ""),
+                "camera": cam,
+                "ip": ip,
             }
-            app.store.write_json(sid, "video.json", meta)
-            if not app.store.read_json(sid, "shot.json"):
+
+            def write_meta():
+                tmpm = os.path.join(base, meta_name + ".tmp")
+                with open(tmpm, "w", encoding="utf-8") as fh:
+                    json.dump(meta, fh, indent=2)
+                os.replace(tmpm, os.path.join(base, meta_name))
+
+            write_meta()
+            if not side and not app.store.read_json(sid, "shot.json"):
                 app.store.write_json(sid, "shot.json", {"received_at": meta["uploaded_at"],
                                                         "test": True, "payload": {}})
-            # Handy liegt quer, Clip kam hochkant -> verlustfrei ins Querformat drehen (clip_orientation)
+            # verlustfrei in die eingestellte Lage drehen (je Kamera eigene Einstellung)
+            okey = "clip_orientation_side" if side else "clip_orientation"
+            mode = app.cfg.data.get(okey, "" if side else "quer_180")
             try:
                 from exporter import fix_orientation
-                new = fix_orientation(app.exporter.ffmpeg, app.store.path(sid, "clip.mp4"),
-                                      app.cfg.data.get("clip_orientation", "quer_180"))
+                new = fix_orientation(app.exporter.ffmpeg, clip, mode)
                 if new:
-                    log.info("Clip %s gedreht (%s, %dx%d)", sid, app.cfg.data.get("clip_orientation"), new[0], new[1])
+                    log.info("Clip %s (%s) gedreht (%s, %dx%d)", sid, cam, mode, new[0], new[1])
                     meta["width"], meta["height"] = new
-                    app.store.write_json(sid, "video.json", meta)
+                    write_meta()
             except Exception:
-                log.exception("Drehen ins Querformat fehlgeschlagen")
+                log.exception("Drehen fehlgeschlagen")
             fmt = "hochkant" if meta["height"] > meta["width"] else "quer"
-            log.info("Video empfangen: %s (%.1f MB, %s fps, %dx%d %s)", sid, length / 1e6, meta["fps"],
-                     meta["width"], meta["height"], fmt)
+            log.info("Video empfangen: %s Kamera %s (%.1f MB, %s fps, %dx%d %s)", sid, cam, length / 1e6,
+                     meta["fps"], meta["width"], meta["height"], fmt)
             if fmt == "hochkant":
                 log.warning("Clip ist HOCHKANT - in der App 'Format: quer' waehlen (oder App updaten), "
-                            "oder in config.json clip_orientation pruefen")
-            app.exporter.enqueue(sid)
+                            "oder Videolage in den Einstellungen pruefen")
+            if side:
+                if base == app.store.path(sid):
+                    threading.Thread(target=app.exporter.sync_side, args=(sid,), daemon=True).start()
+            else:
+                app.exporter.enqueue(sid)
             self.send_json({"ok": True})
 
         # ---- DELETE

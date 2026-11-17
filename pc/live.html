@@ -31,6 +31,7 @@ footer{padding:6px 16px 10px;color:var(--muted);font-size:12px}
   <h1>📷 Kamera ausrichten</h1>
   <span id="stPhone" class="pill">Handy …</span>
   <span class="spacer"></span>
+  <span><button id="camB" class="on" title="Kamera hinten (Linien)">hinten</button><button id="camS" title="Kamera seitlich (90°)">seitlich</button></span>
   <button id="bGrid" class="on" title="Drittel-Raster">Raster</button>
   <button id="bCross" class="on" title="Bildmitte">Mitte</button>
   <button id="bClear" title="Gesetzte Markierungen löschen">Markierungen ✕</button>
@@ -53,11 +54,21 @@ footer{padding:6px 16px 10px;color:var(--muted);font-size:12px}
 const $ = s => document.querySelector(s);
 const img = $('#img'), msg = $('#msg'), ov = $('#ov'), frame = $('#frame');
 let grid = true, cross = true, paused = false, marks = [];
-try { marks = JSON.parse(localStorage.getItem('liveMarks') || '[]'); } catch (e) {}
+// Kamera waehlen (hinten / seitlich); Markierungen werden je Kamera gespeichert
+let cam = 'hinten';
+try { cam = localStorage.getItem('liveCam') || 'hinten'; } catch (e) {}
+const marksKey = () => cam === 'hinten' ? 'liveMarks' : 'liveMarks_' + cam;
+function loadMarks() { try { marks = JSON.parse(localStorage.getItem(marksKey()) || '[]'); } catch (e) { marks = []; } }
+loadMarks();
+function setCam(c) {
+  cam = c; try { localStorage.setItem('liveCam', c); } catch (e) {}
+  $('#camB').classList.toggle('on', c === 'hinten'); $('#camS').classList.toggle('on', c === 'seitlich');
+  loadMarks(); drawOverlay(); img.removeAttribute('src');
+}
 try { const g = JSON.parse(localStorage.getItem('liveGuides') || 'null'); if (g) { grid = g.grid; cross = g.cross; } } catch (e) {}
 
 function saveState() {
-  try { localStorage.setItem('liveMarks', JSON.stringify(marks)); localStorage.setItem('liveGuides', JSON.stringify({ grid, cross })); } catch (e) {}
+  try { localStorage.setItem(marksKey(), JSON.stringify(marks)); localStorage.setItem('liveGuides', JSON.stringify({ grid, cross })); } catch (e) {}
 }
 
 function drawOverlay() {
@@ -74,6 +85,8 @@ function drawOverlay() {
   $('#bGrid').classList.toggle('on', grid); $('#bCross').classList.toggle('on', cross);
 }
 drawOverlay();
+$('#camB').onclick = () => setCam('hinten'); $('#camS').onclick = () => setCam('seitlich');
+setCam(cam);
 
 frame.addEventListener('click', e => {
   const r = frame.getBoundingClientRect();
@@ -92,7 +105,7 @@ async function loop() {
   if (paused) return;
   const t0 = performance.now();
   try {
-    const r = await fetch('/api/preview.jpg?t=' + Date.now(), { cache: 'no-store' });
+    const r = await fetch('/api/preview.jpg?cam=' + encodeURIComponent(cam) + '&t=' + Date.now(), { cache: 'no-store' });
     if (r.ok) {
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
@@ -107,7 +120,7 @@ async function loop() {
       $('#stats').textContent = `${r.headers.get('X-Preview-Fps')} fps · Verzögerung ${Math.round(age * 1000)} ms · ${Math.round(blob.size / 1024)} KB`;
     } else {
       msg.style.display = '';
-      msg.textContent = 'Warte auf Live-Bild vom Handy … (App geöffnet und mit dem PC verbunden?)';
+      msg.textContent = `Warte auf Live-Bild der Kamera „${cam}“ … (App geöffnet, mit dem PC verbunden und in der App auf „Kamera: ${cam}“?)`;
       $('#stats').textContent = '';
     }
   } catch (e) {
@@ -123,10 +136,13 @@ async function status() {
     const st = await (await fetch('/api/status')).json();
     const p = $('#stPhone');
     if (st.phones.length) {
-      const s = st.phones[0].status || {};
-      p.textContent = `Handy ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}`;
-      p.className = 'pill ' + ((s.fps && !s.high_speed) || (s.temp && s.temp >= 43) ? 'warn' : 'ok');
-      $('#camInfo').textContent = s.camera_info || '–';
+      const role = ph => (ph.status || {}).role || ((st.config || {}).camera_roles || {})[ph.addr] || 'hinten';
+      p.textContent = st.phones.map(ph => { const s = ph.status || {};
+        return `${role(ph)} ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}`; }).join('  ·  ');
+      const bad = st.phones.some(ph => { const s = ph.status || {}; return (s.fps && !s.high_speed) || (s.temp && s.temp >= 43); });
+      p.className = 'pill ' + (bad ? 'warn' : 'ok');
+      const me = st.phones.find(ph => role(ph) === cam) || st.phones[0];
+      $('#camInfo').textContent = (me.status || {}).camera_info || '–';
     } else { p.textContent = 'Handy nicht verbunden'; p.className = 'pill bad'; }
   } catch (e) { $('#stPhone').textContent = location.protocol === 'file:' ? 'Seite bitte über http://localhost:8090/live öffnen' : 'Tracer-Programm nicht erreichbar'; $('#stPhone').className = 'pill bad'; }
 }

@@ -34,6 +34,8 @@ class PcLink(private val listener: Listener) {
     @Volatile var host: String = ""
     @Volatile var controlPort: Int = 9300
     @Volatile var uploadPort: Int = 8090
+    /** Rolle dieser Kamera: "hinten" (Down-the-Line, Linien/Analyse) oder "seitlich" (90 Grad, Face-On). */
+    @Volatile var role: String = "hinten"
     @Volatile var connected = false; private set
 
     @Volatile private var running = false
@@ -142,7 +144,8 @@ class PcLink(private val listener: Listener) {
         previewBusy = true
         previewExecutor.execute {
             try {
-                val conn = URL("http://$host:$uploadPort/api/preview").openConnection() as HttpURLConnection
+                val conn = URL("http://$host:$uploadPort/api/preview?cam=" + URLEncoder.encode(role, "UTF-8"))
+                    .openConnection() as HttpURLConnection
                 try {
                     conn.requestMethod = "POST"
                     conn.doOutput = true
@@ -186,6 +189,7 @@ class PcLink(private val listener: Listener) {
             .put("trigger", "%.4f".format(java.util.Locale.US, clip.triggerTimeSec))
             .put("delay", clip.delaySec)
             .put("device", device)
+            .put("cam", role)
         File(clip.file.parentFile, clip.file.nameWithoutExtension + ".json").writeText(meta.toString())
         uploadPending()
     }

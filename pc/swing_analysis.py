@@ -157,6 +157,34 @@ def detect_shaft(frame, ref, ball, head_hint=None):
     return float(x1), float(y1), float(x2), float(y2)
 
 
+def impact_in_window(path, trigger_time, before=2.5, after=0.3):
+    """
+    Treffmoment (Sekunde im Clip) nur im Fenster rund um den R10-Trigger suchen - z.B. im Video der
+    Seitenkamera zum Synchronisieren. Liest nur dieses Fenster (wenig Speicher). None, wenn nicht erkannt.
+    """
+    if not AVAILABLE or trigger_time is None:
+        return None
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 240.0
+    first = max(0, int((trigger_time - before) * fps))
+    last = int((trigger_time + after) * fps)
+    i = 0
+    while i < first and cap.grab():
+        i += 1
+    frames = []
+    while i <= last:
+        ok, f = cap.read()
+        if not ok:
+            break
+        frames.append(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY))
+        i += 1
+    cap.release()
+    if len(frames) < fps * 0.5:
+        return None
+    idx, _ = find_impact(frames, fps)
+    return None if idx is None else round((first + idx) / fps, 4)
+
+
 def analyze(path, trigger_time=None):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
