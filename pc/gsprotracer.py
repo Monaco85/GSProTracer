@@ -955,6 +955,26 @@ def make_handler(app: TracerApp):
                         return self.send_text("FFmpeg fehlt", 503)
                     app.exporter.enqueue(m.group(1))
                     return self.send_json({"queued": True})
+                m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/sync$", u.path)
+                if m:
+                    # Synchronisierung von Hand: {"offset": Sekunden} speichern, {"auto": true} = neu berechnen
+                    sid = m.group(1)
+                    if not app.store.get(sid):
+                        return self.send_text("unknown shot", 404)
+                    body = json.loads(self.read_body() or b"{}")
+                    if body.get("auto"):
+                        try:
+                            os.remove(app.store.path(sid, "sync.json"))
+                        except OSError:
+                            pass
+                        res = app.exporter.sync_side(sid) or {}
+                    else:
+                        old = app.store.read_json(sid, "sync.json") or {}
+                        res = {"offset": round(float(body["offset"]), 5), "method": "manuell",
+                               "auto_offset": old.get("auto_offset", old.get("offset"))}
+                        app.store.write_json(sid, "sync.json", res)
+                        log.info("Seitenkamera %s von Hand synchronisiert: Versatz %+.4f s", sid, res["offset"])
+                    return self.send_json(res)
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/notes$", u.path)
                 if m:
                     sid = m.group(1)

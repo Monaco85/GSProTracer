@@ -241,6 +241,8 @@ class Exporter:
             side = self.store.path(sid, "clip_side.mp4")
             if not os.path.exists(side):
                 return None
+            if (self.store.read_json(sid, "sync.json") or {}).get("method") == "manuell":
+                return None                     # von Hand eingestellt -> nicht ueberschreiben
             vb = self.store.read_json(sid, "video.json") or {}
             vs = self.store.read_json(sid, "video_side.json") or {}
             if vb.get("trigger_time") is None or vs.get("trigger_time") is None:
@@ -551,7 +553,7 @@ class Exporter:
                     return
         # Seitenkamera auf den (jetzt bekannten) Treffmoment hinten genau einrasten
         if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")) and \
-                (self.store.read_json(sid, "sync.json") or {}).get("method") != "treffmoment":
+                (self.store.read_json(sid, "sync.json") or {}).get("method") not in ("treffmoment", "manuell"):
             self.sync_side(sid)
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0

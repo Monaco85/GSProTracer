@@ -231,7 +231,10 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 4. **Synchron:** grob über das gleichzeitige Startsignal, danach genau über den Treffmoment in beiden Videos
    (auf ein Bild = 4 ms). Die Analyse-Seite zeigt beide Videos nebeneinander; Abspielen, Pause, Bild für Bild,
    Spulen und Zeitlupe steuern beide.
-5. Linien, Analyse und Export-Video gibt es nur für die Kamera hinten.
+5. **Von Hand nachstellen:** In der Leiste unter dem Video „Seite −1F / +1F“ verschiebt das Seitenvideo um je ein
+   Bild (wird am Schuss gespeichert und von der Automatik nicht mehr überschrieben), „auto“ stellt den
+   automatischen Wert wieder her. Daneben steht der aktuelle Versatz und wie er ermittelt wurde.
+6. Linien, Analyse und Export-Video gibt es nur für die Kamera hinten.
 
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.

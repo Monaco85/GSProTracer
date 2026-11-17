@@ -87,6 +87,10 @@ dialog::backdrop{background:#0008}
         <option value="help">Linie: Hilfslinie</option>
       </select>
       <button id="bClear" title="Gespeicherte Linien entfernen">Linien ✕</button>
+      <span id="syncBox" class="small" style="display:none">Seite:
+        <button id="bSyncM" title="Seitenvideo 1 Bild früher zeigen">−1F</button><button id="bSyncP" title="Seitenvideo 1 Bild später zeigen">+1F</button>
+        <button id="bSyncAuto" title="Automatische Synchronisierung (Treffmoment) wiederherstellen">auto</button>
+        <span id="syncInfo"></span></span>
       <span id="time"></span>
     </div>
   </div>
@@ -182,7 +186,7 @@ async function poll() {
         select(newest.id, true);
       }
       if (newest && newest.has_video) lastSeenId = newest.id;
-      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video || u.has_side !== cur.has_side)) select(u.id); else if (u) { cur = u; renderExport(); } }
+      if (cur) { const u = list.find(s => s.id === cur.id); if (u && (u.has_video !== cur.has_video || u.has_side !== cur.has_side)) select(u.id); else if (u) { cur = u; renderExport(); renderSync(); } }
       poll.init = true;
     }
   } catch (e) { console.error('Anzeigefehler', e); }
@@ -256,8 +260,28 @@ function select(id, autoplay) {
     vid2.onloadedmetadata = () => { fitCanvas(); syncSide(); };
   } else { vid2.removeAttribute('src'); vid2.load(); }
   requestAnimationFrame(fitCanvas);
+  renderSync();
   draw();
 }
+
+// ---------------------------------------------------------------- Synchronisierung von Hand
+function renderSync() {
+  const two = !!(cur && cur.has_side && cur.has_video);
+  $('#syncBox').style.display = two ? '' : 'none';
+  if (!two) return;
+  const m = (cur.sync || {}).method;
+  $('#syncInfo').textContent = `Versatz ${(sideOffset() * 1000).toFixed(0)} ms · ` +
+    (m === 'manuell' ? 'von Hand' : m === 'treffmoment' ? 'auto (Treffmoment)' : 'auto (Startsignal)');
+}
+async function setSync(body) {
+  if (!cur) return;
+  cur.sync = await (await fetch(`/api/shots/${cur.id}/sync`, { method: 'POST', body: JSON.stringify(body) })).json();
+  renderSync(); syncSide();
+}
+// +1F: Seitenvideo zeigt ein spaeteres Bild -> Versatz kleiner (Zeit hinten = Zeit seitlich + Versatz)
+$('#bSyncP').onclick = () => setSync({ offset: sideOffset() - 1 / fps() });
+$('#bSyncM').onclick = () => setSync({ offset: sideOffset() + 1 / fps() });
+$('#bSyncAuto').onclick = () => { $('#syncInfo').textContent = 'wird berechnet …'; setSync({ auto: true }); };
 
 // ---------------------------------------------------------------- zweite Kamera (seitlich) synchron
 // Zeit hinten = Zeit seitlich + offset (sync.json: Treffmoment bzw. Startsignal)
