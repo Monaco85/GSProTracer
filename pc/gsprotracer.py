@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-17d (zwei Kameras, Linien seitlich, Fokus auf Ball, mph + Carry)"
+VERSION = "2026-11-17e (Export mit beiden Kameras, schneller, Seitenlinie verbessert)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -57,6 +57,7 @@ DEFAULT_CONFIG = {
     "auto_analysis": True,             # Treffmoment + Schaftlinien automatisch erkennen (OpenCV)
     "export_trim": True,               # Export vom Ansprechen (kurz davor) bis kurz nach dem Treffmoment
     "only_complete_shots": True,       # Schuesse ohne Treffmoment/Ansprech-/Schlaglinie verwerfen
+    "export_side": True,               # Seitenkamera synchron neben die Kamera hinten ins Export-Video
     "export_lead_seconds": 0.15,       # Vorlauf im Export vor dem Rueckschwung (0,15 s = ~1 s in Zeitlupe 1/8)
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
@@ -69,7 +70,7 @@ DEFAULT_CONFIG = {
     "clip_orientation": "quer_180",    # Clips verlustfrei drehen: quer = Sensorbild, quer_180 = auf dem Kopf
                                        # (Handy andersherum), "" = so lassen wie aufgenommen
     "export_delay_seconds": 8,         # Export erst nach dem Ballflug starten (GSPro/Connector nicht stoeren)
-    "export_threads": 2,               # CPU-Kerne fuer den Export (0 = alle)
+    "export_threads": 4,               # CPU-Kerne fuer den Export (0 = alle); laeuft mit niedriger Prioritaet
 }
 
 
@@ -93,6 +94,11 @@ class Config:
             self.data["export_trim"] = True
             self.data["only_complete_shots"] = True
             self.data["settings_version"] = 3
+        # einmalig: schnellerer Export (4 statt 2 Kerne, weiterhin niedrige Prioritaet)
+        if self.data.get("settings_version", 0) < 5:
+            if int(self.data.get("export_threads", 2) or 0) == 2:
+                self.data["export_threads"] = 4
+            self.data["settings_version"] = 5
         # einmalig: Schwarzweiss und heller
         if self.data.get("settings_version", 0) < 4:
             self.data["export_monochrome"] = True
@@ -706,7 +712,7 @@ class TracerApp:
             self.store.write_json(sid, "notes.json", notes)
             changed.append(sid)
             if enqueue:
-                self.exporter.enqueue(sid)
+                self.exporter.enqueue(sid, delay=False)
         if changed:
             log.info("%d Clip(s) gedreht (%s) - Linien und Videos werden neu erstellt", len(changed), mode)
         return changed
@@ -730,7 +736,7 @@ class TracerApp:
         self.exporter.start()
         for sid in changed:
             if (self.store.read_json(sid, "export.json") or {}).get("file"):
-                self.exporter.enqueue(sid)   # ohne Export werden sie von exporter.start() schon eingereiht
+                self.exporter.enqueue(sid, delay=False)   # ohne Export werden sie von exporter.start() schon eingereiht
         handler = make_handler(self)
         httpd = QuietHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
         httpd.daemon_threads = True
@@ -960,14 +966,14 @@ def make_handler(app: TracerApp):
                     elif app.cfg.data.get("export_lead_seconds") != lead_before:
                         for s in app.store.list():          # neuer Vorlauf -> Videos neu zuschneiden
                             if s["has_video"] and (s.get("export") or {}).get("file"):
-                                app.exporter.enqueue(s["id"])
+                                app.exporter.enqueue(s["id"], delay=False)
                     return self.send_json(app.cfg.data)
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/export$", u.path)
                 if m:
                     self.read_body()
                     if not app.exporter.ffmpeg:
                         return self.send_text("FFmpeg fehlt", 503)
-                    app.exporter.enqueue(m.group(1))
+                    app.exporter.enqueue(m.group(1), delay=False)
                     return self.send_json({"queued": True})
                 m = re.match(r"^/api/shots/([A-Za-z0-9_-]+)/sync$", u.path)
                 if m:
@@ -999,8 +1005,8 @@ def make_handler(app: TracerApp):
                     notes.update(upd)
                     notes = {k: v for k, v in notes.items() if v is not None}
                     app.store.write_json(sid, "notes.json", notes)
-                    if "lines" in upd:          # Linien geaendert -> Video mit Daten neu erstellen
-                        app.exporter.enqueue(sid)
+                    if "lines" in upd or "side_lines" in upd:   # Linien geaendert -> Video neu erstellen
+                        app.exporter.enqueue(sid, delay=False)
                     return self.send_json(notes)
                 self.send_text("not found", 404)
             except (BrokenPipeError, ConnectionResetError):

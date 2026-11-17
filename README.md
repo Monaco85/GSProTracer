@@ -207,8 +207,9 @@ sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerte
 | `export_monochrome` | true | Schwarzweiß (klarer, Linien heben sich ab, Export ca. 10 % schneller und kleiner) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
 | `clip_orientation` | quer_180 | Videolage, verlustfrei beim Empfang: `quer_180` = Sensorbild auf den Kopf gestellt, `quer` = Sensorbild, leer = wie aufgenommen. Auch auf der Analyse-Seite unter Einstellungen → Videolage; vorhandene Clips werden mitgedreht, Linien und Videos neu erstellt |
-| `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten, damit GSPro/Connector nicht ausgebremst werden |
-| `export_threads` | 2 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
+| `export_delay_seconds` | 8 | Export erst nach dem Ballflug starten (einmal pro Schlag, ab Upload gerechnet) |
+| `export_side` | true | Seitenkamera synchron neben die Kamera hinten ins Export-Video |
+| `export_threads` | 4 | CPU-Kerne für den Export (0 = alle); läuft zusätzlich mit niedriger Priorität |
 | `export_trim` | true | Export ab kurz vor dem Rückschwung (siehe `export_lead_seconds`) bis 0,6 s nach dem Treffen |
 | `clip_orientation_side` | "" | Videolage der Seitenkamera (wie `clip_orientation`; leer = wie aufgenommen) |
 | `camera_roles` | {} | nur für alte Apps: Rolle je IP, z. B. `{"192.168.1.163": "seitlich"}` |
@@ -240,7 +241,12 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 6. **Von Hand nachstellen:** In der Leiste unter dem Video „Seite −1F / +1F“ verschiebt das Seitenvideo um je ein
    Bild (wird am Schuss gespeichert und von der Automatik nicht mehr überschrieben), „auto“ stellt den
    automatischen Wert wieder her. Daneben steht der aktuelle Versatz und wie er ermittelt wurde.
-7. Das Export-Video (`pc\exports\`) zeigt weiterhin nur die Kamera hinten.
+7. **Export-Video mit beiden Kameras:** In `pc\exports\` liegen beide Videos synchron nebeneinander (Seitenkamera
+   auf gleiche Höhe skaliert, mit ihren Linien). Nur die Kamera hinten: `"export_side": false`.
+8. **Linie seitlich falsch?** Einfach im Seitenvideo von Hand ziehen (vom Schlägerkopf den Schaft entlang, Art
+   wie in der Auswahl „Linie: …“ unten; „Abschwung“ = Treffmoment). Sie ersetzt die automatische, das
+   Export-Video wird neu erstellt. Die Erkennung seitlich zählt nur dünne Linien (Schaft), keine Kanten von
+   Beinen, Hose oder Wand.
 
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.

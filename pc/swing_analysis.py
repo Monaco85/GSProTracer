@@ -33,9 +33,9 @@ def _read_gray(path, max_frames=2400, skip_seconds=0.0):
     """Graubilder lesen; skip_seconds am Anfang ueberspringen (spart Speicher). Rueckgabe frames, fps, skip."""
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 240.0
-    skip = 0
-    while skip < int(max(0.0, skip_seconds) * fps) and cap.grab():
-        skip += 1
+    skip = int(max(0.0, skip_seconds) * fps)
+    if skip:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, skip)      # bildgenauer Sprung (schneller als Durchlesen)
     frames = []
     while len(frames) < max_frames:
         ok, f = cap.read()
@@ -119,14 +119,39 @@ def find_takeaway_quiet(e, address, impact, fps):
     return seg[len(seg) // 2] if seg else None
 
 
-def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88):
+def ridge_score(img, x1, y1, x2, y2):
+    """
+    Wie sehr ist das Segment eine DUENNE Linie (Schaft) statt einer Kante (Bein, Hose, Wand)?
+    Entlang des Segments: Helligkeit auf der Linie gegen beide Seiten. Schaft: beide Seiten gleich anders
+    (hell auf dunkel oder umgekehrt). Kante: eine Seite wie die Linie, die andere anders -> kleiner Wert.
+    """
+    H, W = img.shape
+    L = math.hypot(x2 - x1, y2 - y1)
+    if L < 1:
+        return 0.0
+    nx, ny = -(y2 - y1) / L, (x2 - x1) / L
+    k = max(5.0, 0.007 * max(W, H))
+    vals = []
+    for t in np.linspace(0.1, 0.9, 24):
+        px, py = x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+        pts = [(px, py), (px + nx * k, py + ny * k), (px - nx * k, py - ny * k)]
+        if not all(0 <= a < W and 0 <= b < H for a, b in pts):
+            continue
+        c, l, r = (float(img[int(b), int(a)]) for a, b in pts)
+        dl, dr = c - l, c - r
+        vals.append(min(abs(dl), abs(dr)) if dl * dr > 0 else 0.0)
+    return float(np.median(vals)) if len(vals) >= 6 else 0.0
+
+
+def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88, thin=False):
     """Schaftlinie im Bild 'frame' (mit Schlaeger) gegen 'ref' (ohne Schlaeger in Ballnaehe)."""
     H, W = frame.shape
     bx, by = ball
-    diff = cv2.absdiff(cv2.GaussianBlur(frame, (3, 3), 0), cv2.GaussianBlur(ref, (3, 3), 0))
+    blur_frame = cv2.GaussianBlur(frame, (3, 3), 0)
+    diff = cv2.absdiff(blur_frame, cv2.GaussianBlur(ref, (3, 3), 0))
     _, mask = cv2.threshold(diff, 14, 255, cv2.THRESH_BINARY)
     mask = cv2.dilate(mask, np.ones((5, 5), np.uint8))
-    edges = cv2.Canny(cv2.GaussianBlur(frame, (3, 3), 0), 25, 75)
+    edges = cv2.Canny(blur_frame, 25, 75)
     edges = cv2.bitwise_and(edges, mask)
     edges[int(by + 0.06 * H):, :] = 0                      # unterhalb des Balls kein Schaft
     segs = cv2.HoughLinesP(edges, 1, np.pi / 360, threshold=40,
@@ -149,6 +174,12 @@ def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88):
         if dist > 0.10 * W or y1 > hy + 0.05 * H:
             continue
         score = length / (1.0 + dist / 25.0)
+        if thin:
+            # Seitenansicht: Beine/Hose/Wand liefern lange Kanten -> nur duenne Linien (Schaft) zaehlen
+            rs = ridge_score(blur_frame, x1, y1, x2, y2)
+            if rs < 4.0:
+                continue
+            score *= min(3.0, rs / 6.0)
         if score > best_score:
             best, best_score = (x1, y1, x2, y2), score
     if not best:
@@ -172,9 +203,9 @@ def impact_in_window(path, trigger_time, before=2.5, after=0.3):
     fps = cap.get(cv2.CAP_PROP_FPS) or 240.0
     first = max(0, int((trigger_time - before) * fps))
     last = int((trigger_time + after) * fps)
-    i = 0
-    while i < first and cap.grab():
-        i += 1
+    i = first
+    if first:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first)
     frames = []
     while i <= last:
         ok, f = cap.read()
@@ -189,7 +220,7 @@ def impact_in_window(path, trigger_time, before=2.5, after=0.3):
     return None if idx is None else round((first + idx) / fps, 4)
 
 
-def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung")):
+def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung"), thin=False):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
     {"error": ...}. Zeiten in Sekunden im Clip.
@@ -233,7 +264,7 @@ def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Anspreche
                 fi = address - int(back * fps)
                 if fi < 0:
                     break
-                shaft = detect_shaft(frames[fi], frames[ref], ball, head, max_ang)
+                shaft = detect_shaft(frames[fi], frames[ref], ball, head, max_ang, thin)
                 if shaft:
                     address = fi
                     break
@@ -252,7 +283,7 @@ def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Anspreche
         r = impact - int(0.2 * fps)
         if r < 0:
             break
-        shaft = detect_shaft(frames[d], frames[r], ball, head, max_ang)
+        shaft = detect_shaft(frames[d], frames[r], ball, head, max_ang, thin)
         if shaft:
             x1, y1, x2, y2 = shaft
             res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,

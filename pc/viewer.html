@@ -70,7 +70,7 @@ dialog::backdrop{background:#0008}
   <div id="center">
     <div id="stages">
       <div id="stage"><span class="camlbl">hinten</span><div id="empty">Noch kein Schuss ausgewählt</div><video id="vid" playsinline muted preload="auto"></video><canvas id="cv"></canvas></div>
-      <div id="stage2"><span class="camlbl" id="lblSide">seitlich</span><video id="vid2" playsinline muted preload="auto"></video><canvas id="cv2" style="position:absolute;pointer-events:none"></canvas></div>
+      <div id="stage2"><span class="camlbl" id="lblSide">seitlich</span><video id="vid2" playsinline muted preload="auto"></video><canvas id="cv2" style="position:absolute;cursor:crosshair" title="Linie von Hand ziehen: vom Schlägerkopf den Schaft entlang (Art wie in der Auswahl unten)"></canvas></div>
     </div>
     <div id="tl"><div class="prog" id="prog"></div></div>
     <div id="bar">
@@ -439,6 +439,31 @@ function drawSide() {
   }
 }
 vid2.addEventListener('timeupdate', drawSide); vid2.addEventListener('seeked', drawSide);
+
+// Linie im Seitenvideo von Hand ziehen (ersetzt die automatische gleicher Art)
+let drag2 = null;
+const rel2 = e => { const r = $('#cv2').getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+$('#cv2').onmousedown = e => {
+  if (!cur || !cur.has_side) return;
+  const p = rel2(e), ty = LINE_TYPES[$('#lineType').value];
+  const label = ty.label === 'Abschwung' ? 'Treffmoment' : ty.label;
+  drag2 = { x1: p[0], y1: p[1], x2: p[0], y2: p[1], color: ty.color, label, extend: true,
+            from: ty.fromZero ? 0 : Math.round(vid2.currentTime * 10000) / 10000 };
+};
+$('#cv2').onmousemove = e => {
+  if (!drag2) return;
+  const p = rel2(e); drag2.x2 = p[0]; drag2.y2 = p[1];
+  const keep = ((cur.notes && cur.notes.side_lines) || []).filter(l => !(drag2.label && l.label === drag2.label));
+  const save = cur.notes.side_lines; cur.notes.side_lines = keep.concat([drag2]); drawSide(); cur.notes.side_lines = save;
+};
+$('#cv2').onmouseup = async () => {
+  const d = drag2; drag2 = null;
+  if (d && cur && Math.hypot(d.x2 - d.x1, d.y2 - d.y1) > 0.01) {
+    const keep = ((cur.notes && cur.notes.side_lines) || []).filter(l => !(d.label && l.label === d.label));
+    await saveNotes({ side_lines: keep.concat([d]) });
+  }
+  drawSide();
+};
 window.addEventListener('resize', fitCanvas);
 // Linien werden in notes.json gespeichert und beim Export ins Video gezeichnet.
 // Ziehen: vom Schlägerkopf den Schaft entlang nach oben. Die Linie wird bis zum Bildrand verlängert.
@@ -490,7 +515,7 @@ cv.onmouseup = async () => {
   }
   draw();
 };
-$('#bClear').onclick = async () => { if (cur && confirm('Alle Linien dieses Schlags löschen?')) { await saveNotes({ lines: [] }); draw(); } };
+$('#bClear').onclick = async () => { if (cur && confirm('Alle Linien dieses Schlags löschen (hinten und seitlich)?')) { await saveNotes({ lines: [], side_lines: [] }); draw(); drawSide(); } };
 
 // ---------------------------------------------------------------- settings dialog
 $('#btnSettings').onclick = async () => {

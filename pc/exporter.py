@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 8
+EXPORT_VERSION = 9
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -135,6 +135,12 @@ def fix_orientation(ffmpeg, clip, mode="quer"):
     return None
 
 
+def vb_trig(video):
+    """trigger_time aus video.json / video_side.json oder None."""
+    v = (video or {}).get("trigger_time")
+    return float(v) if isinstance(v, (int, float)) else None
+
+
 def _num(v, digits=1):
     if v is None or v == "":
         return None
@@ -245,38 +251,40 @@ class Exporter:
             log.warning("FFmpeg nicht gefunden - kein Video-Export mit Schlagdaten (winget install Gyan.FFmpeg)")
 
     def process_side(self, sid):
-        """Seitenkamera: synchronisieren und Ansprech-/Treffmoment-Linie erkennen (einmal pro Clip)."""
+        """Seitenkamera: Ansprech-/Treffmoment-Linie erkennen (einmal pro Clip) und synchronisieren."""
         try:
             if not os.path.exists(self.store.path(sid, "clip_side.mp4")):
                 return
         except ValueError:
             return
+        notes = self.store.read_json(sid, "notes.json") or {}
+        if "side_analysis" not in notes and self.cfg.data.get("auto_analysis", True):
+            try:
+                import swing_analysis
+                if swing_analysis.AVAILABLE:
+                    vs = self.store.read_json(sid, "video_side.json") or {}
+                    # Seitenansicht: Schaft steht steiler, Beine/Wand liefern Kanten -> nur duenne Linien
+                    res = swing_analysis.analyze(self.store.path(sid, "clip_side.mp4"), vs.get("trigger_time"),
+                                                 max_ang=89.5, window=5.0, labels=("Ansprechen", "Treffmoment"),
+                                                 thin=True)
+                else:
+                    res = None
+            except Exception as e:
+                log.exception("Analyse Seitenkamera %s fehlgeschlagen", sid)
+                res = {"error": str(e)[:200]}
+            if res is not None:
+                notes = self.store.read_json(sid, "notes.json") or {}      # frisch lesen
+                notes["side_analysis"] = {k: v for k, v in res.items() if k != "lines"}
+                if "error" not in res:
+                    manual = [l for l in notes.get("side_lines") or [] if not l.get("auto")]
+                    have = {l.get("label") for l in manual}
+                    notes["side_lines"] = manual + [l for l in res.get("lines", []) if l["label"] not in have]
+                self.store.write_json(sid, "notes.json", notes)
+                why = "; ".join(str(res[k]) for k in ("error", "address_error", "downswing_error") if res.get(k))
+                log.info("Analyse Seitenkamera %s: Linien: %s%s", sid,
+                         ", ".join(l["label"] for l in res.get("lines", [])) or "keine", f" ({why})" if why else "")
         if (self.store.read_json(sid, "sync.json") or {}).get("method") not in ("treffmoment", "manuell"):
             self.sync_side(sid)
-        notes = self.store.read_json(sid, "notes.json") or {}
-        if "side_analysis" in notes or not self.cfg.data.get("auto_analysis", True):
-            return
-        try:
-            import swing_analysis
-            if not swing_analysis.AVAILABLE:
-                return
-            vs = self.store.read_json(sid, "video_side.json") or {}
-            # Seitenansicht: Schaft steht steiler -> bis fast senkrecht zulassen; nur die letzten 5 s lesen
-            res = swing_analysis.analyze(self.store.path(sid, "clip_side.mp4"), vs.get("trigger_time"),
-                                         max_ang=89.5, window=5.0, labels=("Ansprechen", "Treffmoment"))
-        except Exception as e:
-            log.exception("Analyse Seitenkamera %s fehlgeschlagen", sid)
-            res = {"error": str(e)[:200]}
-        notes = self.store.read_json(sid, "notes.json") or {}      # frisch lesen
-        notes["side_analysis"] = {k: v for k, v in res.items() if k != "lines"}
-        if "error" not in res:
-            manual = [l for l in notes.get("side_lines") or [] if not l.get("auto")]
-            have = {l.get("label") for l in manual}
-            notes["side_lines"] = manual + [l for l in res.get("lines", []) if l["label"] not in have]
-        self.store.write_json(sid, "notes.json", notes)
-        why = "; ".join(str(res[k]) for k in ("error", "address_error", "downswing_error") if res.get(k))
-        log.info("Analyse Seitenkamera %s: Linien: %s%s", sid,
-                 ", ".join(l["label"] for l in res.get("lines", [])) or "keine", f" ({why})" if why else "")
 
     def sync_side(self, sid):
         """
@@ -302,11 +310,14 @@ class Exporter:
             if ib is None:
                 ib = (notes.get("analysis") or {}).get("impact_time")
             if ib is not None:
-                try:
-                    import swing_analysis
-                    i_side = swing_analysis.impact_in_window(side, float(vs["trigger_time"]))
-                except Exception:
-                    i_side = None
+                # Treffmoment seitlich: aus der Analyse der Seitenkamera (spart einen Durchlauf), sonst suchen
+                i_side = ((self.store.read_json(sid, "notes.json") or {}).get("side_analysis") or {}).get("impact_time")
+                if i_side is None:
+                    try:
+                        import swing_analysis
+                        i_side = swing_analysis.impact_in_window(side, float(vs["trigger_time"]))
+                    except Exception:
+                        i_side = None
                 if i_side is not None:
                     off = float(ib) - i_side
                     if abs(off - trig_off) < 0.25:          # passt zur groben Schaetzung -> genauer Wert
@@ -380,16 +391,16 @@ class Exporter:
             if not s["has_video"]:
                 continue
             if not ex:
-                self.enqueue(s["id"])
+                self.enqueue(s["id"], delay=False)
             elif ex.get("file") and ex.get("version") != EXPORT_VERSION:
-                self.enqueue(s["id"])
+                self.enqueue(s["id"], delay=False)
                 redo += 1
         if redo:
             log.info("%d Export-Video(s) aus einer aelteren Version werden neu erstellt", redo)
 
-    def enqueue(self, shot_id):
+    def enqueue(self, shot_id, delay=True):
         if self.ffmpeg:
-            self.q.put(shot_id)
+            self.q.put((shot_id, time.time() if delay else 0.0))
 
     def _worker(self):
         _lower_thread_priority()
@@ -399,10 +410,11 @@ class Exporter:
         except Exception:
             pass
         while True:
-            sid = self.q.get()
-            # erst loslegen, wenn GSPro den Schlag fertig verarbeitet hat (Ballflug, Antwort an den Connector)
-            wait = float(self.cfg.data.get("export_delay_seconds", 8) or 0)
-            if wait > 0:
+            sid, queued_at = self.q.get()
+            # erst loslegen, wenn GSPro den Schlag fertig verarbeitet hat (Ballflug, Antwort an den Connector).
+            # Gerechnet ab dem Einreihen -> bei zwei Kameras wird nicht zweimal gewartet.
+            wait = float(self.cfg.data.get("export_delay_seconds", 8) or 0) - (time.time() - queued_at)
+            if queued_at and wait > 0:
                 time.sleep(wait)
             self.busy = sid
             if sid.startswith("side:"):                # nur Seitenkamera: synchronisieren + Linien
@@ -430,7 +442,7 @@ class Exporter:
         if not swing_analysis.AVAILABLE:
             log.info("Automatische Linien aus: OpenCV fehlt (pip install opencv-python-headless numpy)")
             return notes
-        res = swing_analysis.analyze(clip, (video or {}).get("trigger_time"))
+        res = swing_analysis.analyze(clip, (video or {}).get("trigger_time"), window=5.5)
         notes = self.store.read_json(sid, "notes.json") or {}   # frisch lesen (Viewer koennte geschrieben haben)
         notes["analysis"] = {k: v for k, v in res.items() if k not in ("lines", "paths")}
         if "error" in res:
@@ -449,16 +461,31 @@ class Exporter:
         self.store.write_json(sid, "notes.json", notes)
         return notes
 
-    def _line_overlays(self, lines, w, h, shot_dir, fs, files, font_bold, t0=0.0):
+    def _line_overlays(self, lines, w, h, shot_dir, fs, files, font_bold, t0=0.0, prefix="", diff_ref=False):
         """
-        Erzeugt pro Linie ein transparentes PNG (per FFmpeg geq) und die Beschriftung.
+        Erzeugt pro Linie ein transparentes PNG und die Beschriftung.
         Linie: {"x1","y1","x2","y2"} normiert 0..1 (Punkt 1 = Schlaegerkopf, Punkt 2 = Richtung Griff),
         "color" "#rrggbb", "label", "from" (Sekunde im Clip, ab der sie sichtbar ist), "extend" (bis Bildrand).
-        Rueckgabe: ({png: from}, [drawtext-Filter fuer Beschriftungen])
+        t0: Clip-Zeit, bei der das (zugeschnittene) Video beginnt. prefix: fuer mehrere Videos (Dateinamen).
+        diff_ref: bei den uebrigen Linien die Veraenderung gegenueber "Ansprechen" anzeigen (Seitenkamera).
+        Rueckgabe: ({png: start}, [drawtext-Filter fuer Beschriftungen])
         """
         import math
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            cv2 = None
         inputs, filters = {}, []
-        fr = _esc(FONT_REGULAR)
+
+        def orient(ln):                     # Lage im Bild 0..180 Grad (gegen den Uhrzeigersinn), Punkt 1 unten
+            x1, y1, x2, y2 = (float(ln[k]) for k in ("x1", "y1", "x2", "y2"))
+            x1, x2, y1, y2 = x1 * w, x2 * w, y1 * h, y2 * h
+            if y1 < y2:
+                x1, y1, x2, y2 = x2, y2, x1, y1
+            return math.degrees(math.atan2(y1 - y2, x2 - x1))
+
+        ref = next((l for l in lines if l.get("label") == "Ansprechen"), None) if diff_ref else None
         for i, ln in enumerate(lines):
             try:
                 X1, Y1 = float(ln["x1"]) * w, float(ln["y1"]) * h
@@ -469,34 +496,58 @@ class Exporter:
                 continue
             col = str(ln.get("color", "#4aa3ff")).lstrip("#")
             r, g, b = int(col[0:2], 16), int(col[2:4], 16), int(col[4:6], 16)
-            A, B, C = Y2 - Y1, X1 - X2, X2 * Y1 - X1 * Y2
-            L = math.hypot(A, B)
-            ybot = max(Y1, Y2) + 0.02 * h
-            ytop = 0 if ln.get("extend", True) else min(Y1, Y2)
-            d = f"abs({A:.3f}*X+{B:.3f}*Y+{C:.3f})/{L:.3f}"
-            on = f"between(Y,{ytop:.1f},{ybot:.1f})"
-            png = f"_ov_line{i}.png"
-            geq = (f"r='if(lt({d},2.2),{r},0)':g='if(lt({d},2.2),{g},0)':b='if(lt({d},2.2),{b},0)'"
-                   f":a='255*clip(4-{d},0,1)*{on}'")
-            res = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
-                                  "-i", f"color=c=black@0:s={w}x{h},format=rgba", "-vf", f"geq={geq}",
-                                  "-frames:v", "1", png], cwd=shot_dir, capture_output=True, text=True,
-                                 creationflags=_LOW_PRIO)
-            if res.returncode != 0:
-                log.warning("Linie %d: %s", i, res.stderr.strip()[-300:])
+            # unten am Schlaegerkopf etwas ueberstehen lassen, oben bis zum Bildrand verlaengern
+            (bx, by), (tx, ty) = ((X1, Y1), (X2, Y2)) if Y1 >= Y2 else ((X2, Y2), (X1, Y1))
+            if ln.get("extend", True) and ty != by:
+                tx, ty = bx + (tx - bx) * (0 - by) / (ty - by), 0.0
+            by2 = by + 0.02 * h
+            bx2 = bx + (tx - bx) * (by2 - by) / (ty - by) if ty != by else bx
+            png = f"_ov_{prefix}line{i}.png"
+            if cv2 is not None:
+                img = np.zeros((h, w, 4), np.uint8)
+                th = max(3, int(round(min(w, h) * 0.0045)))
+                p1, p2 = (int(bx2), int(by2)), (int(tx), int(ty))
+                cv2.line(img, p1, p2, (0, 0, 0, 150), th + 3, cv2.LINE_AA)
+                cv2.line(img, p1, p2, (b, g, r, 255), th, cv2.LINE_AA)
+                ok = cv2.imwrite(os.path.join(shot_dir, png), img)
+            else:                           # ohne OpenCV: per FFmpeg geq (langsamer)
+                A, B, C = Y2 - Y1, X1 - X2, X2 * Y1 - X1 * Y2
+                L = math.hypot(A, B)
+                ytop = 0 if ln.get("extend", True) else min(Y1, Y2)
+                d = f"abs({A:.3f}*X+{B:.3f}*Y+{C:.3f})/{L:.3f}"
+                on = f"between(Y,{ytop:.1f},{max(Y1, Y2) + 0.02 * h:.1f})"
+                geq = (f"r='if(lt({d},2.2),{r},0)':g='if(lt({d},2.2),{g},0)':b='if(lt({d},2.2),{b},0)'"
+                       f":a='255*clip(4-{d},0,1)*{on}'")
+                res = subprocess.run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                                      "-i", f"color=c=black@0:s={w}x{h},format=rgba", "-vf", f"geq={geq}",
+                                      "-frames:v", "1", png], cwd=shot_dir, capture_output=True, text=True,
+                                     creationflags=_LOW_PRIO)
+                ok = res.returncode == 0
+            if not ok:
+                log.warning("Linie %d konnte nicht gezeichnet werden", i)
                 continue
             start = max(0.0, float(ln.get("from", 0) or 0) - t0)   # Zeit im zugeschnittenen Video
             inputs[png] = start
-            # Beschriftung mit Winkel zur Horizontalen
+            # Beschriftung mit Winkel zur Horizontalen (+ Veraenderung gegenueber dem Ansprechen)
             ang = math.degrees(math.atan2(abs(Y2 - Y1), abs(X2 - X1)))
-            label = f"{ln.get('label', '')} {ang:.0f}°".strip().replace(".", ",")
-            tf = f"_ov_lbl{i}.txt"
+            label = f"{ln.get('label', '')} {ang:.0f}°".strip()
+            if ref is not None and ln is not ref:
+                try:
+                    dd = orient(ln) - orient(ref)
+                    label += f" ({dd:+.0f}° ggü. Ansprechen)"
+                except (KeyError, TypeError, ValueError):
+                    pass
+            label = label.replace(".", ",")
+            tf = f"_ov_{prefix}lbl{i}.txt"
             files[tf] = label
             with open(os.path.join(shot_dir, tf), "w", encoding="utf-8", newline="\n") as f:
                 f.write(label)
-            top_x, top_y = (X2, Y2) if Y2 < Y1 else (X1, Y1)
-            lx = int(min(max(top_x + fs * 0.6, 8), w - fs * 9))
-            ly = int(min(max(top_y - fs * 1.8 - i * fs * 1.6, 8), h - fs * 2))
+            if diff_ref:                    # Seitenkamera: Beschriftungen oben links untereinander
+                lx, ly = int(fs * 0.6), int(fs * 0.8 + len(filters) * fs * 1.9)
+            else:
+                top_x, top_y = (X2, Y2) if Y2 < Y1 else (X1, Y1)
+                lx = int(min(max(top_x + fs * 0.6, 8), w - fs * 9))
+                ly = int(min(max(top_y - fs * 1.8 - i * fs * 1.6, 8), h - fs * 2))
             filters.append(
                 f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
                 f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={lx}:y={ly}:enable='gte(t,{start:.4f})'")
@@ -608,6 +659,7 @@ class Exporter:
         # Seitenkamera auf den (jetzt bekannten) Treffmoment hinten genau einrasten, Linien erkennen
         if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")):
             self.process_side(sid)
+            notes = self.store.read_json(sid, "notes.json") or notes      # Linien der Seitenkamera neu lesen
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         addr = (notes.get("analysis") or {}).get("address_time")
@@ -618,7 +670,29 @@ class Exporter:
         # Linien (z.B. Schaft beim Ansprechen / im Abschwung) aus notes.json
         line_inputs, line_filters = self._line_overlays(notes.get("lines") or [], w, h, shot_dir, fs, files, fb, t0)
 
-        vf = ",".join(line_filters + [
+        # ---- Seitenkamera daneben (synchron, gleiche Hoehe)
+        side_clip = os.path.join(shot_dir, "clip_side.mp4")
+        side = None
+        if self.cfg.data.get("export_side", True) and os.path.exists(side_clip):
+            try:
+                vsd = self.store.read_json(sid, "video_side.json") or {}
+                sync = self.store.read_json(sid, "sync.json") or {}
+                off = sync.get("offset")
+                if off is None and vb_trig(video) is not None and vb_trig(vsd) is not None:
+                    off = vb_trig(video) - vb_trig(vsd)
+                ssize = display_size(self.ffmpeg, side_clip) or (int(vsd.get("width") or 1280), int(vsd.get("height") or 720))
+                if off is not None:
+                    ts0 = t0 - float(off)                    # Zeit im Seitenvideo, wenn das Video hinten bei t0 ist
+                    # zuerst auf die Hoehe des Videos hinten bringen -> Filter/Linien auf weniger Bildpunkten
+                    sw2 = max(2, int(round(ssize[0] * h / ssize[1] / 2)) * 2)
+                    s_inputs, s_filters = self._line_overlays(notes.get("side_lines") or [], sw2, h,
+                                                              shot_dir, fs, files, fb, ts0, prefix="s", diff_ref=True)
+                    side = {"ts0": ts0, "size": (sw2, h), "inputs": s_inputs, "filters": s_filters}
+            except Exception:
+                log.exception("Seitenkamera fuer Export %s", sid)
+                side = None
+
+        vf = ",".join(([] if side else line_filters) + [
             panel_box,
             dt("_ov_head.txt", fb, hs, x1, top, "0xFFEB3B"),
             dt("_ov_l1.txt", fr, fs, x1, body, "0xB0BEC5"),
@@ -638,7 +712,7 @@ class Exporter:
         cmd += ["-i", "clip.mp4"]
         for png in line_inputs:
             cmd += ["-loop", "1", "-i", png]
-        # [0:v] -> aufhellen -> Linien -> Panel/Texte (Overlay braucht filter_complex)
+        # [0:v] -> aufhellen -> Linien -> (Seitenkamera daneben) -> Panel/Texte (filter_complex)
         chain, cur = [], "[0:v]"
         bright = self._brighten_filter()
         if bright:
@@ -647,6 +721,36 @@ class Exporter:
         for i, (png, start) in enumerate(line_inputs.items(), start=1):
             chain.append(f"{cur}[{i}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[l{i}]")
             cur = f"[l{i}]"
+        if side:
+            if line_filters:
+                chain.append(f"{cur}{','.join(line_filters)}[bl]")
+                cur = "[bl]"
+            k = 1 + len(line_inputs)                    # Eingang der Seitenkamera
+            ts0 = side["ts0"]
+            if ts0 > 0:
+                cmd += ["-ss", f"{ts0:.4f}"]
+            if t1:
+                cmd += ["-t", f"{t1 - t0 + 0.5:.4f}"]
+            cmd += ["-i", "clip_side.mp4"]
+            for png in side["inputs"]:
+                cmd += ["-loop", "1", "-i", png]
+            # beginnt die Seitenkamera spaeter / endet sie frueher: erstes/letztes Bild halten
+            pad = f"tpad=start_mode=clone:start_duration={-ts0:.4f}:stop_mode=clone:stop_duration=5" if ts0 < 0 \
+                else "tpad=stop_mode=clone:stop_duration=5"
+            scur = f"[{k}:v]"
+            chain.append(f"{scur}scale={side['size'][0]}:{side['size'][1]},{pad}{',' + bright if bright else ''}[sb]")
+            scur = "[sb]"
+            for j, (png, start) in enumerate(side["inputs"].items(), start=1):
+                chain.append(f"{scur}[{k + j}:v]overlay=0:0:shortest=1:enable='gte(t,{start:.4f})'[sl{j}]")
+                scur = f"[sl{j}]"
+            if side["filters"]:
+                chain.append(f"{scur}{','.join(side['filters'])}[ss]")
+            else:
+                chain.append(f"{scur}null[ss]")
+            chain.append(f"{cur}[ss]hstack=inputs=2:shortest=1[hs]")
+            cur = "[hs]"
+            for png in side["inputs"]:
+                files[png] = ""
         chain.append(f"{cur}{vf}[out]")
         cmd += ["-filter_complex", ";".join(chain), "-map", "[out]"]
         if self.encoder is None:
