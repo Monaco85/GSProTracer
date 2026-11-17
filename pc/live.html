@@ -32,6 +32,8 @@ footer{padding:6px 16px 10px;color:var(--muted);font-size:12px}
   <span id="stPhone" class="pill">Handy …</span>
   <span class="spacer"></span>
   <span><button id="camB" class="on" title="Kamera hinten (Linien)">hinten</button><button id="camS" title="Kamera seitlich (90°)">seitlich</button></span>
+  <button id="bFocus" title="Danach ins Bild auf den Ball klicken: Kamera stellt dort fest scharf">🎯 Fokus auf Ball</button>
+  <button id="bFocusAuto" title="Wieder normaler Autofokus">Fokus auto</button>
   <button id="bGrid" class="on" title="Drittel-Raster">Raster</button>
   <button id="bCross" class="on" title="Bildmitte">Mitte</button>
   <button id="bClear" title="Gesetzte Markierungen löschen">Markierungen ✕</button>
@@ -47,13 +49,13 @@ footer{padding:6px 16px 10px;color:var(--muted);font-size:12px}
     <div id="stats"></div>
   </div>
 </main>
-<footer>Ins Bild klicken setzt eine Markierung (z. B. Ballposition, Abschlagmatte) – sie bleibt gespeichert, damit du die Kamera später wieder genauso ausrichten kannst. Das Handy sendet nur, solange diese Seite offen ist.
+<footer><b>Fokus:</b> „🎯 Fokus auf Ball“ und dann auf den Ball klicken – die Kamera stellt dort einmal scharf und hält den Fokus fest (auch nach Neustart der App). Ins Bild klicken (ohne Fokus-Knopf) setzt eine Markierung (z. B. Ballposition, Abschlagmatte) – sie bleibt gespeichert, damit du die Kamera später wieder genauso ausrichten kannst. Das Handy sendet nur, solange diese Seite offen ist.
   <details style="margin-top:6px"><summary>Kamera-Diagnose (was das Handy anbietet)</summary><pre id="camInfo" style="white-space:pre-wrap;margin:6px 0 0">–</pre></details></footer>
 
 <script>
 const $ = s => document.querySelector(s);
 const img = $('#img'), msg = $('#msg'), ov = $('#ov'), frame = $('#frame');
-let grid = true, cross = true, paused = false, marks = [];
+let grid = true, cross = true, paused = false, marks = [], focusMark = null;
 // Kamera waehlen (hinten / seitlich); Markierungen werden je Kamera gespeichert
 let cam = 'hinten';
 try { cam = localStorage.getItem('liveCam') || 'hinten'; } catch (e) {}
@@ -81,12 +83,34 @@ function drawOverlay() {
     s += L(m[0] - 2, m[1], m[0] + 2, m[1], '#4aa3ff') + L(m[0], m[1] - 3.5, m[0], m[1] + 3.5, '#4aa3ff');
     s += `<text x="${m[0] + 1}" y="${m[1] - 2}" fill="#4aa3ff" font-size="3" style="font-size:13px">${i + 1}</text>`;
   });
+  if (focusMark) {
+    const [fx, fy] = focusMark;
+    s += `<rect x="${fx - 2.5}" y="${fy - 4}" width="5" height="8" fill="none" stroke="#3fb97a" style="stroke-width:2px" vector-effect="non-scaling-stroke"/>`;
+  }
   ov.innerHTML = s;
   $('#bGrid').classList.toggle('on', grid); $('#bCross').classList.toggle('on', cross);
 }
 drawOverlay();
 $('#camB').onclick = () => setCam('hinten'); $('#camS').onclick = () => setCam('seitlich');
 setCam(cam);
+
+// Fokus: naechster Klick ins Bild = dort fest scharfstellen (Ball)
+let focusMode = false;
+$('#bFocus').onclick = () => { focusMode = !focusMode; $('#bFocus').classList.toggle('on', focusMode);
+  msgFocus(focusMode ? 'Jetzt im Bild auf den Ball klicken' : ''); };
+$('#bFocusAuto').onclick = async () => { await fetch('/api/focus', { method: 'POST', body: JSON.stringify({ cam, auto: true }) });
+  msgFocus('Kamera „' + cam + '“: Autofokus'); };
+function msgFocus(t) { $('#stats').textContent = t; }
+frame.addEventListener('click', async e => {
+  if (!focusMode) return;
+  e.stopImmediatePropagation();
+  const r = frame.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  focusMode = false; $('#bFocus').classList.remove('on');
+  const res = await (await fetch('/api/focus', { method: 'POST', body: JSON.stringify({ cam, x, y }) })).json();
+  msgFocus(res.sent ? `Kamera „${cam}“ stellt auf den Ball scharf …` : 'Kein Handy verbunden');
+  focusMark = [x * 100, y * 100]; drawOverlay();
+}, true);
 
 frame.addEventListener('click', e => {
   const r = frame.getBoundingClientRect();
@@ -138,7 +162,8 @@ async function status() {
     if (st.phones.length) {
       const role = ph => (ph.status || {}).role || ((st.config || {}).camera_roles || {})[ph.addr] || 'hinten';
       p.textContent = st.phones.map(ph => { const s = ph.status || {};
-        return `${role(ph)} ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}`; }).join('  ·  ');
+        const fo = s.focus ? ` · Fokus ${s.focus === 'ball' ? 'Ball' : 'auto'}${s.af && s.af !== '-' ? ' (' + s.af + ')' : ''}` : '';
+        return `${role(ph)} ✓ ${s.width || '?'}×${s.height || '?'} @ ${s.fps || '?'} fps${s.temp ? ' · ' + Math.round(s.temp) + ' °C' : ''}${fo}`; }).join('  ·  ');
       const bad = st.phones.some(ph => { const s = ph.status || {}; return (s.fps && !s.high_speed) || (s.temp && s.temp >= 43); });
       p.className = 'pill ' + (bad ? 'warn' : 'ok');
       const me = st.phones.find(ph => role(ph) === cam) || st.phones[0];

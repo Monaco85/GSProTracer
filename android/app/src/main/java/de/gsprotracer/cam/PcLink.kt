@@ -27,6 +27,8 @@ class PcLink(private val listener: Listener) {
         fun onUploadState(pending: Int, lastMessage: String)
         /** PC moechte ein Live-Bild (wird alle ~2 s erneuert, solange die Live-Seite offen ist). */
         fun onPreviewRequest()
+        /** PC: fest auf Punkt (x, y im Live-Bild, 0..1) scharfstellen, oder auto = wieder Autofokus. */
+        fun onFocusCommand(x: Double, y: Double, auto: Boolean)
     }
 
     companion object { private const val TAG = "PcLink" }
@@ -129,6 +131,13 @@ class PcLink(private val listener: Listener) {
             "preview" -> {
                 msg.optInt("upload_port", 0).takeIf { it > 0 }?.let { uploadPort = it }
                 listener.onPreviewRequest()
+            }
+            "focus" -> {
+                // nur die Kamera mit der passenden Rolle reagiert (leer = alle)
+                val cam = msg.optString("cam", "")
+                if (cam.isEmpty() || cam == role) {
+                    listener.onFocusCommand(msg.optDouble("x", 0.5), msg.optDouble("y", 0.5), msg.optBoolean("auto", false))
+                }
             }
         }
     }

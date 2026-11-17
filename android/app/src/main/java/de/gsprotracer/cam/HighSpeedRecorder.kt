@@ -9,6 +9,11 @@ import android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
+import android.graphics.PointF
+import android.graphics.Rect
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -113,6 +118,127 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
     private var encoderSurface: Surface? = null
     private var previewSurface: Surface? = null
     private var locked = false
+
+    // ---- Fokus: fest auf einen Punkt (Ball) statt Dauer-Autofokus, der bei Bewegung im Bild nachsucht
+    /** Fokuspunkt in Sensor-Koordinaten (0..1 im Videobild, Sensor-Ausrichtung) oder null = Autofokus. */
+    @Volatile var focusPoint: PointF? = null; private set
+    @Volatile var afState = "-"; private set
+    private var activeArray: Rect? = null
+    private var maxAfRegions = 0
+    private val afCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
+            afState = when (result.get(CaptureResult.CONTROL_AF_STATE)) {
+                CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> "scharf (fest)"
+                CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> "NICHT scharf (fest)"
+                CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN, CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN -> "sucht"
+                CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> "scharf (auto)"
+                CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> "unscharf (auto)"
+                else -> afState
+            }
+        }
+    }
+
+    /**
+     * Punkt im angezeigten Bild (0..1) in Sensor-Koordinaten umrechnen.
+     * rotDeg = Drehung, mit der das Bild gegenueber dem Sensor angezeigt wird (im Uhrzeigersinn).
+     */
+    fun toSensorPoint(u: Float, v: Float, rotDeg: Int): PointF = when (((rotDeg % 360) + 360) % 360) {
+        90 -> PointF(v, 1f - u)
+        180 -> PointF(1f - u, 1f - v)
+        270 -> PointF(1f - v, u)
+        else -> PointF(u, v)
+    }
+
+    /** Drehung des Videos/Live-Bilds (fuer Klicks auf der PC-Seite). */
+    fun videoRotation(): Int = mode?.let { orientationHint(it) } ?: 0
+
+    /** Drehung der Vorschau auf dem Handy-Display (fuer Antippen). */
+    fun screenRotation(): Int = mode?.let { ((it.sensorOrientation - displayRotationDeg) % 360 + 360) % 360 } ?: 0
+
+    /** Fest auf diesen Punkt scharfstellen (Sensor-Koordinaten, null = wieder Autofokus). */
+    fun setFocusPoint(p: PointF?) {
+        camHandler.post {
+            focusPoint = p
+            applyRepeating()
+            if (p != null) triggerAf() else cancelAf()
+        }
+    }
+
+    private fun afRegion(p: PointF): Array<MeteringRectangle>? {
+        val a = activeArray ?: return null
+        val m = mode ?: return null
+        if (maxAfRegions <= 0) return null
+        // Videobild (z.B. 16:9) ist ein mittiger Ausschnitt des Sensors (meist 4:3)
+        val aspect = m.size.width.toFloat() / m.size.height
+        var cropW = a.width().toFloat(); var cropH = cropW / aspect
+        if (cropH > a.height()) { cropH = a.height().toFloat(); cropW = cropH * aspect }
+        val x = a.left + (a.width() - cropW) / 2 + p.x.coerceIn(0f, 1f) * cropW
+        val y = a.top + (a.height() - cropH) / 2 + p.y.coerceIn(0f, 1f) * cropH
+        val half = (cropW * 0.04f).toInt().coerceAtLeast(16)
+        val l = (x - half).toInt().coerceIn(a.left, a.right - 2 * half)
+        val t = (y - half).toInt().coerceIn(a.top, a.bottom - 2 * half)
+        return arrayOf(MeteringRectangle(l - a.left, t - a.top, 2 * half, 2 * half, MeteringRectangle.METERING_WEIGHT_MAX))
+    }
+
+    private fun buildRequest(trigger: Int): CaptureRequest? {
+        val dev = camera ?: return null
+        val m = mode ?: return null
+        val b = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+        previewSurface?.let { b.addTarget(it) }
+        encoderSurface?.let { b.addTarget(it) }
+        b.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+        b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, m.fpsRange)
+        val zr = zoomRange
+        if (android.os.Build.VERSION.SDK_INT >= 30 && zr != null) {
+            b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio.coerceIn(zr.lower, zr.upper))
+        }
+        b.set(CaptureRequest.CONTROL_AE_LOCK, locked)
+        b.set(CaptureRequest.CONTROL_AWB_LOCK, locked)
+        val fp = focusPoint
+        if (fp != null) {
+            // einmal auf den Ball scharfstellen (Trigger) und dann festhalten - AUTO sucht nicht von selbst nach
+            b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+            afRegion(fp)?.let { b.set(CaptureRequest.CONTROL_AF_REGIONS, it) }
+        } else {
+            // Dauer-Autofokus; "sperren" = per Trigger an der aktuellen Stelle festhalten
+            b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+        }
+        b.set(CaptureRequest.CONTROL_AF_TRIGGER, trigger)
+        return b.build()
+    }
+
+    private fun sendOnce(req: CaptureRequest) {
+        val s = session ?: return
+        val m = mode ?: return
+        if (m.highSpeed && s is CameraConstrainedHighSpeedCaptureSession) {
+            s.captureBurst(s.createHighSpeedRequestList(req), afCallback, camHandler)
+        } else {
+            s.capture(req, afCallback, camHandler)
+        }
+    }
+
+    private fun triggerAf() {
+        try {
+            buildRequest(CaptureRequest.CONTROL_AF_TRIGGER_START)?.let { sendOnce(it) }
+            afState = "sucht"
+            camHandler.postDelayed({
+                listener.onCameraStatus(if (focusPoint != null) "Fokus auf Ball: $afState" else "Fokus gesperrt: $afState")
+            }, 1500)
+        } catch (e: Exception) {
+            Log.w(TAG, "AF-Trigger", e)
+        }
+    }
+
+    private fun cancelAf() {
+        try {
+            buildRequest(CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)?.let { sendOnce(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "AF-Cancel", e)
+        }
+    }
+
+    /** Gespeicherten Fokuspunkt setzen, bevor die Kamera startet (wird nach dem Start angewendet). */
+    fun restoreFocusPoint(p: PointF?) { focusPoint = p }
 
     private var fpsWindowStart = 0L
     private var fpsWindowFrames = 0
@@ -226,6 +352,10 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
                     return@post
                 }
                 mode = m
+                manager.getCameraCharacteristics(m.cameraId).let { ch ->
+                    activeArray = ch.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                    maxAfRegions = ch.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+                }
                 zoomRange = if (android.os.Build.VERSION.SDK_INT >= 30)
                     manager.getCameraCharacteristics(m.cameraId).get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                 else null
@@ -334,6 +464,8 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
             override fun onConfigured(s: CameraCaptureSession) {
                 session = s
                 applyRepeating()
+                // gespeicherter Ballpunkt / Sperre: kurz warten, bis Belichtung steht, dann scharfstellen
+                if (focusPoint != null || locked) camHandler.postDelayed({ triggerAf() }, 1200)
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
@@ -346,34 +478,23 @@ class HighSpeedRecorder(private val context: Context, private val listener: List
 
     /** AE/AWB/AF einfrieren, damit nichts pumpt, wenn der Golfer ins Bild kommt. */
     fun setLocked(lock: Boolean) {
-        camHandler.post { locked = lock; applyRepeating() }
+        camHandler.post {
+            locked = lock
+            applyRepeating()
+            if (focusPoint == null) { if (lock) triggerAf() else cancelAf() }
+        }
     }
 
     private fun applyRepeating() {
         val s = session ?: return
-        val dev = camera ?: return
         val m = mode ?: return
         try {
-            val b = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-            previewSurface?.let { b.addTarget(it) }
-            encoderSurface?.let { b.addTarget(it) }
-            b.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-            b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, m.fpsRange)
-            val zr = zoomRange
-            if (android.os.Build.VERSION.SDK_INT >= 30 && zr != null) {
-                b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio.coerceIn(zr.lower, zr.upper))
-            }
-            b.set(CaptureRequest.CONTROL_AE_LOCK, locked)
-            b.set(CaptureRequest.CONTROL_AWB_LOCK, locked)
-            b.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                if (locked) CaptureRequest.CONTROL_AF_MODE_OFF else CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-            )
+            val req = buildRequest(CaptureRequest.CONTROL_AF_TRIGGER_IDLE) ?: return
             s.stopRepeating()
             if (m.highSpeed && s is CameraConstrainedHighSpeedCaptureSession) {
-                s.setRepeatingBurst(s.createHighSpeedRequestList(b.build()), null, camHandler)
+                s.setRepeatingBurst(s.createHighSpeedRequestList(req), afCallback, camHandler)
             } else {
-                s.setRepeatingRequest(b.build(), null, camHandler)
+                s.setRepeatingRequest(req, afCallback, camHandler)
             }
         } catch (e: Exception) {
             Log.e(TAG, "applyRepeating", e)

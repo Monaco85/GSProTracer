@@ -114,6 +114,8 @@ PC und Handy müssen im **selben WLAN** sein.
 | Verbinden | Verbindung zur eingetragenen PC-IP |
 | Testclip | 3-s-Clip ohne R10 (zum Testen/Ausrichten) |
 | Kamera: hinten / seitlich | Rolle bei zwei Handys: **hinten** (Down-the-Line, Linien und Analyse) oder **seitlich** (90°, Face-On) |
+| Ins Bild tippen | **Fokus fest auf diese Stelle** (Ball): stellt einmal scharf und hält den Fokus, auch wenn Schläger/Körper durchs Bild gehen; wird gespeichert |
+| Fokus: fest auf Ball ✕ / automatisch | festen Fokus aufheben (wieder Autofokus) |
 | Format: quer / hochkant | Ausrichtung der Aufnahme (Standard: quer) |
 | Modus: 240 fps / 720p ↔ 120 fps / 1080p | 1080p kann einen größeren Bildausschnitt haben |
 | Weitwinkel | nur sichtbar, wenn das Handy Zoom < 1× für Fremd-Apps anbietet |
@@ -238,6 +240,14 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.
+
+### Fokus auf den Ball
+
+Der normale Video-Autofokus sucht nach, sobald sich Schläger oder Körper durchs Bild bewegen – dann wird es
+kurz unscharf. Besser: **fest auf den Ball scharfstellen**, entweder am Handy ins Bild auf den Ball tippen oder
+am PC auf **Kamera ausrichten → 🎯 Fokus auf Ball** und auf den Ball klicken (oben die Kamera wählen). Die Kamera
+stellt einmal scharf und hält den Fokus; nach einem Neustart der App wird automatisch wieder dort scharfgestellt.
+Oben auf der Live-Seite steht der Zustand („Fokus Ball (scharf (fest))“). „Fokus auto“ hebt es auf.
 
 ## 6. Kamera-Aufbau, Licht, Weitwinkel
 

@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
@@ -71,6 +72,11 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         buildUi()
         recorder = HighSpeedRecorder(this, this)
         recorder.extraRotation = prefs.getInt("rotation", 0)
+        // gespeicherter Fokuspunkt (Ball) - wird nach dem Kamerastart angewendet
+        if (prefs.contains("focus_x")) {
+            recorder.restoreFocusPoint(android.graphics.PointF(prefs.getFloat("focus_x", .5f), prefs.getFloat("focus_y", .5f)))
+        }
+        updateFocusButton()
         recorder.maxFps = prefs.getInt("maxFps", HighSpeedRecorder.TARGET_FPS)
         recorder.zoomRatio = prefs.getFloat("zoom", 1f)
         link = PcLink(this)
@@ -103,6 +109,11 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         texture = TextureView(this)
         root.addView(texture, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
+        // Antippen = an dieser Stelle (Ball) fest scharfstellen
+        texture.setOnTouchListener { v, e ->
+            if (e.action == MotionEvent.ACTION_UP) { focusAtScreen(e.x, e.y); v.performClick() }
+            true
+        }
         root.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
             // groesstes 16:9- (quer) bzw. 9:16-Rechteck (hochkant) -> komplettes Bild sichtbar
             val w = r - l; val h = b - t
@@ -154,6 +165,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         btnOrient = button("") { toggleOrientation() }
         btnRotate = button("Drehung") { cycleRotation() }
         btnLock = button("Belichtung/Fokus sperren") { toggleLock() }
+        btnFocus = button("Fokus: automatisch") { focusButton() }
         btnFps = button("") { toggleFps() }
         btnZoom = button("Weitwinkel") { toggleZoom() }.apply { visibility = View.GONE }
         btnDim = button("Display dimmen") { toggleDim() }
@@ -171,6 +183,37 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
         link.reconnect()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(ipField.windowToken, 0)
         ipField.clearFocus()
+    }
+
+    private lateinit var btnFocus: Button
+
+    /** Ins Vorschaubild tippen = dort (Ball) fest scharfstellen. */
+    private fun focusAtScreen(x: Float, y: Float) {
+        if (texture.width == 0 || texture.height == 0 || !::recorder.isInitialized) return
+        val p = recorder.toSensorPoint(x / texture.width, y / texture.height, recorder.screenRotation())
+        applyFocus(p)
+    }
+
+    private fun applyFocus(p: android.graphics.PointF?) {
+        if (p == null) prefs.edit().remove("focus_x").remove("focus_y").apply()
+        else prefs.edit().putFloat("focus_x", p.x).putFloat("focus_y", p.y).apply()
+        recorder.setFocusPoint(p)
+        updateFocusButton()
+    }
+
+    private fun focusButton() {
+        if (recorder.focusPoint != null) applyFocus(null)            // zurueck auf Autofokus
+        else android.widget.Toast.makeText(this, "Zum Scharfstellen im Bild auf den Ball tippen", android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    private fun updateFocusButton() {
+        if (::btnFocus.isInitialized && ::recorder.isInitialized) btnFocus.text =
+            if (recorder.focusPoint != null) "Fokus: fest auf Ball ✕" else "Fokus: automatisch"
+    }
+
+    override fun onFocusCommand(x: Double, y: Double, auto: Boolean) = ui {
+        if (auto) applyFocus(null)
+        else applyFocus(recorder.toSensorPoint(x.toFloat(), y.toFloat(), recorder.videoRotation()))
     }
 
     private lateinit var btnRole: Button
@@ -509,5 +552,7 @@ class MainActivity : Activity(), HighSpeedRecorder.Listener, PcLink.Listener {
             .put("camera_info", recorder.cameraInfo)
             .put("format", if (isPortrait()) "hochkant" else "quer")
             .put("role", if (::link.isInitialized) link.role else "hinten")
+            .put("focus", if (recorder.focusPoint != null) "ball" else "auto")
+            .put("af", recorder.afState)
     }
 }

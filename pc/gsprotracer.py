@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-17 (zwei Kameras: hinten + seitlich synchron)"
+VERSION = "2026-11-17b (zwei Kameras synchron, Fokus fest auf Ball)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -927,6 +927,18 @@ def make_handler(app: TracerApp):
             try:
                 if u.path == "/api/upload":
                     return self.handle_upload(q)
+                if u.path == "/api/focus":
+                    # Handy fest auf einen Punkt (Ball) scharfstellen lassen: {"cam", "x", "y"} oder {"cam", "auto": true}
+                    body = json.loads(self.read_body() or b"{}")
+                    cam = body.get("cam", "") if body.get("cam") in ("hinten", "seitlich") else ""
+                    msg = {"type": "focus", "cam": cam, "auto": bool(body.get("auto"))}
+                    if not msg["auto"]:
+                        msg["x"] = min(1.0, max(0.0, float(body.get("x", 0.5))))
+                        msg["y"] = min(1.0, max(0.0, float(body.get("y", 0.5))))
+                    n = app.hub.broadcast(msg)
+                    log.info("Fokus %s: %s", cam or "alle", "automatisch" if msg["auto"] else
+                             f"fest auf Punkt {msg['x']:.2f}/{msg['y']:.2f}")
+                    return self.send_json({"sent": n})
                 if u.path == "/api/preview":
                     cam = parse_qs(u.query).get("cam", [""])[0]
                     if cam not in ("hinten", "seitlich"):
