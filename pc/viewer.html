@@ -7,8 +7,8 @@
 <style>
 :root{--bg:#0f1214;--panel:#181c1f;--panel2:#20262a;--line:#2c3439;--text:#e6ebee;--muted:#8b979e;--acc:#3fb97a;--warn:#e0a63a;--bad:#e05a4f;--mark:#4aa3ff}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
-header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 header h1{font-size:16px;margin:0 12px 0 0;letter-spacing:.5px}
 .pill{padding:3px 10px;border-radius:99px;background:var(--panel2);color:var(--muted);font-size:12px;white-space:nowrap}
 .pill.ok{color:#08150e;background:var(--acc)} .pill.bad{color:#fff;background:var(--bad)} .pill.warn{color:#1a1200;background:var(--warn)}
@@ -16,16 +16,18 @@ button,select,input{font:inherit;color:var(--text);background:var(--panel2);bord
 button{cursor:pointer} button:hover{border-color:var(--muted)} button.on{background:var(--acc);color:#08150e;border-color:var(--acc)}
 input[type=number]{width:70px}
 .spacer{flex:1}
-main{display:grid;grid-template-columns:280px 1fr 300px;gap:0;height:calc(100vh - 54px)}
+main{display:grid;grid-template-columns:260px 1fr 290px;gap:0;flex:1;min-height:0}
 #list{overflow:auto;border-right:1px solid var(--line)}
 .shot{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px}
 .shot:hover{background:var(--panel)} .shot.sel{background:var(--panel2);box-shadow:inset 3px 0 var(--acc)}
 .shot .t{color:var(--muted);font-size:12px} .shot .v{font-variant-numeric:tabular-nums}
 .shot .nv{color:var(--warn);font-size:11px}
 #center{display:flex;flex-direction:column;min-width:0;padding:12px;gap:8px}
-#stages{flex:1;min-height:0;display:flex;gap:8px}
-#stage,#stage2{position:relative;flex:1;min-width:0;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-#stage2{display:none}
+#stages{flex:1;min-height:0;display:flex;gap:8px;align-items:flex-start}
+#stage,#stage2{position:relative;min-width:0;min-height:0;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+#stage{flex:1.6;align-self:stretch}
+/* Seitenkamera kleiner: ~40 % der Breite, nur so hoch wie das Bild */
+#stage2{display:none;flex:1;max-height:100%}
 #stages.two #stage2{display:flex}
 #stage video,#stage2 video{max-width:100%;max-height:100%;display:block}
 .camlbl{position:absolute;left:8px;top:6px;font-size:11px;color:#fff;background:#0009;padding:2px 7px;border-radius:99px;pointer-events:none;z-index:2;display:none}
@@ -46,7 +48,7 @@ textarea{width:100%;min-height:60px;background:var(--panel2);color:var(--text);b
 .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:520px}
 dialog::backdrop{background:#0008}
-@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}#list{max-height:220px}#stage,#stage2{min-height:300px}#stages{flex-direction:column}}
+@media (max-width:1000px){body{height:auto;overflow:auto}main{grid-template-columns:1fr;height:auto}#list{max-height:220px}#stage,#stage2{min-height:300px}#stages{flex-direction:column}}
 </style>
 </head>
 <body>
