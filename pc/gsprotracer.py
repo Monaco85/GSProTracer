@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-17e (Export mit beiden Kameras, schneller, Seitenlinie verbessert)"
+VERSION = "2026-11-17f (Export mit beiden Kameras, schneller, Seitenlinie verbessert)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -62,7 +62,7 @@ DEFAULT_CONFIG = {
     "export_crf": 20,                  # Qualitaet (niedriger = besser/groesser; 20 ~ 7 MB, 28 ~ 0,5 MB)
     "export_denoise": 3,               # leichtes Entrauschen vor dem Aufhellen (0 = aus)
     "export_encoder": "auto",          # auto = Grafikkarte (NVIDIA/Intel/AMD) wenn moeglich, sonst Prozessor; cpu = immer Prozessor
-    "export_preset": "medium",         # x264-Preset bei Prozessor-Export (slow = etwas kleiner, dauert laenger)
+    "export_preset": "veryfast",       # x264-Preset bei Prozessor-Export (medium = etwas kleiner, dauert laenger)
     "export_brightness": 1.0,          # Aufhellen im Export (0 = aus, 0,6 = deutlich, 1,0 = stark)
     "export_monochrome": True,         # Schwarzweiss: Schwung klarer, farbige Linien heben sich ab
     "clip_orientation_side": "",       # Videolage der Seitenkamera (quer / quer_180 / "" = wie aufgenommen)
@@ -94,6 +94,11 @@ class Config:
             self.data["export_trim"] = True
             self.data["only_complete_shots"] = True
             self.data["settings_version"] = 3
+        # einmalig: schnelleres Kodieren (veryfast statt medium: ca. 25 % schneller, Datei etwas groesser)
+        if self.data.get("settings_version", 0) < 6:
+            if self.data.get("export_preset", "medium") == "medium":
+                self.data["export_preset"] = "veryfast"
+            self.data["settings_version"] = 6
         # einmalig: schnellerer Export (4 statt 2 Kerne, weiterhin niedrige Prioritaet)
         if self.data.get("settings_version", 0) < 5:
             if int(self.data.get("export_threads", 2) or 0) == 2:

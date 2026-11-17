@@ -202,7 +202,7 @@ sie nie. Fehlende Einträge ergänzt der Tracer beim Start mit den Standardwerte
 | `export_playback_fps` | 30 | 30 = Zeitlupe 1/8, 60 = 1/4, 240 = Echtzeit |
 | `export_crf` | 20 | Qualität: 20 = sehr gut, 23 = gut, 28 = klein (niedriger = besser/größer) |
 | `export_encoder` | auto | `auto` = Video auf der Grafikkarte kodieren, wenn möglich (NVIDIA NVENC, Intel Quick Sync, AMD AMF; bei NVIDIA auch das Lesen per CUDA), sonst Prozessor. `cpu` = immer Prozessor. Im Fenster steht, was benutzt wird |
-| `export_preset` | medium | nur beim Prozessor-Export: x264-Preset (`slow` = etwas kleiner, dauert länger) |
+| `export_preset` | veryfast | nur beim Prozessor-Export: x264-Preset (`medium` = etwas kleiner, dauert ca. 25 % länger) |
 | `export_brightness` | 1,0 | Aufhellen: 0 = aus, 0,6 = deutlich, 1,0 = stark (gilt auch für die Analyse-Seite) |
 | `export_monochrome` | true | Schwarzweiß (klarer, Linien heben sich ab, Export ca. 10 % schneller und kleiner) |
 | `export_denoise` | 3 | leichtes Entrauschen vor dem Aufhellen (0 = aus) |
