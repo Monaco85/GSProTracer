@@ -32,7 +32,7 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
 - Aussehen der Export-Videos geändert → `EXPORT_VERSION` in `exporter.py` erhöhen (alte Videos werden neu erstellt).
 - Tests: `python pc/test_sample.py` (Beispiel-Schlag in `samples/`, hochkant, alte Kameraposition).
   End-to-End: Server-Kopie im Scratchpad mit anderen Ports, Uploads per `curl` auf `/api/upload?...&cam=`,
-  Browser-Prüfung mit Playwright. Kein echter Clip seiner aktuellen Aufbauten (quer/kopfüber, seitlich) vorhanden.
+  Browser-Prüfung mit Playwright. Echter Clip seines Aufbaus (hinten quer + seitlich hochkant): `samples/20261118-101835-01`.
 
 ## Wichtige Entscheidungen / Wünsche
 - Export: Schwarzweiß, aufgehellt (Tonwertkurve), zugeschnitten (0,15 s vor dem Rückschwung bis 0,6 s nach
@@ -47,8 +47,11 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
 ## Offene Punkte
 1. **Export dauert bei ihm > 1 min** (hier ~6 s Analyse + ~16 s Video + 8 s Wartezeit). Log-Zeilen mit Uhrzeiten
    von ihm fehlen noch; größter Hebel: NVENC auf der 3060 Ti zum Laufen bringen.
-2. **Ansprechlinie seitlich** an echtem Face-On-Clip prüfen (er soll einen Schuss nach `samples/` pushen).
-3. **Ansprechlinie hinten** wurde bei seinem neuen Aufbau anfangs nicht erkannt → ebenfalls echter Clip nötig.
+2. **Seitlich beim Treffen** ist der Schaft bei wenig Licht nur ein verwischter Streifen → Treffmoment-Linie seitlich
+   wird meist NICHT erkannt (bewusst: lieber keine als eine falsche; von Hand ziehbar). Mehr Licht würde helfen.
+3. Ansprechposition wurde zu spät erkannt (langsamer Rückschwung-Beginn) → behoben mit `refine_address`
+   (Bewegung über 0,1 s). Echter Clip seines Aufbaus: `samples/20261118-101835-01` (Rechtshänder, hinten + seitlich).
+   `ANALYSIS_VERSION` in `swing_analysis.py` hochzählen → gespeicherte Schüsse werden einmal neu analysiert.
 4. **Connector-Abbrüche / R10 blinkt rot**: Ursache war, dass GSPro nicht antwortete (`GSPro->Connector 0`);
    Lösung: GSPro API Connect neu starten. Tracer loggt das inzwischen mit Diagnose (Port 921).
 5. Carry: prüfen, ob der Connector überhaupt einen Wert liefert.

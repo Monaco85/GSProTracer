@@ -11,6 +11,8 @@ Ein echter Schlag zum Testen und Weiterentwickeln, ohne Handy, R10 oder GSPro.
 | `video.json` | Metadaten vom Handy (fps, Größe, Zeitpunkt des R10-Triggers im Clip) |
 | `reference.json` | **Von Hand gesetzte Referenz:** Treffmoment 3,232 s, Schaft beim Ansprechen (Bild 1,50 s) und im Abschwung (Bild 3,215 s) |
 
+**`20261118-101835-01/`**: Lob Wedge (LW), **Rechtshänder**, aktueller Aufbau – Kamera hinten quer (1280×720), Seitenkamera hochkant (`clip_side.mp4`, 720×1280). `reference.json`: Treffmoment 3,078 s, Ansprechen bei 2,057 s (am Bild geprüft), Schlaghand RH. `video*.json` sind rekonstruiert (Trigger ≈ Treffmoment + 0,6 s).
+
 **`export_beispiel_W3_135kmh.mp4`**: Export-Video vom 12.11. (Zeitlupe 1/8, Daten in km/h, Linien; noch ohne Aufhellung und Schwungbahn, stark komprimiert).
 
 ## Benutzen

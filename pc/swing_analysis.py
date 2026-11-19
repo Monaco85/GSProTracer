@@ -26,6 +26,9 @@ except ImportError:  # Analyse ist optional
     AVAILABLE = False
 
 
+# Hochzaehlen, wenn sich die Erkennung verbessert -> gespeicherte Schuesse werden einmal neu analysiert
+ANALYSIS_VERSION = 2
+
 ADDRESS_LEAD = 0.4   # Sekunden vor dem Ansprech-Bild, mit denen das Export-Video beginnt (1/8 Zeitlupe: ~3 s)
 
 
@@ -77,13 +80,16 @@ def find_impact(frames, fps, lower=0.5, lo=None, hi=None):
     return best, (loc[0], loc[1] + y0)
 
 
-def motion_curve(frames, ball, fps, box=(220, 180)):
-    """Bewegungsenergie in einem Fenster um den Ball (Differenz zu 4 Bilder vorher)."""
+def motion_curve(frames, ball, fps, box=(220, 180), lag=None):
+    """
+    Bewegungsenergie in einem Fenster um den Ball (Differenz zu 'lag' Bildern vorher, Standard 1/60 s).
+    Mit groesserem lag (z.B. 0,1 s) faellt auch ein langsam beginnender Rueckschwung auf.
+    """
     H, W = frames[0].shape
     bx, by = ball
     x0, x1 = max(0, bx - box[0] // 2), min(W, bx + box[0] // 2)
     y0, y1 = max(0, by - box[1]), min(H, by + box[1] // 3)
-    d = int(max(1, round(fps / 60)))
+    d = int(lag) if lag else int(max(1, round(fps / 60)))
     e = np.zeros(len(frames))
     for i in range(d, len(frames)):
         a = frames[i][y0:y1, x0:x1].astype(np.int16)
@@ -110,6 +116,23 @@ def find_address(e, impact, fps):
     if i <= int(0.05 * fps):
         return None  # Clip beginnt erst waehrend des Rueckschwungs
     return max(0, i - int(0.04 * fps))
+
+
+def refine_address(e_slow, address, impact, fps):
+    """
+    Beginn des Rueckschwungs genauer: Der Rueckschwung startet oft langsam - zwischen Bildern im Abstand
+    1/60 s sieht das noch 'ruhig' aus. Mit 0,1 s Abstand nicht: so lange rueckwaerts gehen, bis es auch
+    dort ruhig ist.
+    """
+    if address is None:
+        return None
+    thr = max(0.004, float(np.percentile(e_slow[:impact], 30)) * 2.5)
+    j = min(address + int(0.04 * fps), impact - 1)
+    while j > 0 and e_slow[j] > thr:
+        j -= 1
+    if j <= int(0.05 * fps):
+        return address
+    return max(0, j - int(0.04 * fps))
 
 
 def find_takeaway_quiet(e, address, impact, fps):
@@ -143,7 +166,7 @@ def ridge_score(img, x1, y1, x2, y2):
     return float(np.median(vals)) if len(vals) >= 6 else 0.0
 
 
-def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88, thin=False):
+def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88, thin=False, near=None):
     """Schaftlinie im Bild 'frame' (mit Schlaeger) gegen 'ref' (ohne Schlaeger in Ballnaehe)."""
     H, W = frame.shape
     bx, by = ball
@@ -174,6 +197,8 @@ def detect_shaft(frame, ref, ball, head_hint=None, max_ang=88, thin=False):
         if dist > 0.10 * W or y1 > hy + 0.05 * H:
             continue
         score = length / (1.0 + dist / 25.0)
+        if near is not None and math.hypot(x1 - hx, y1 - hy) > near * H:
+            continue                                         # Segment muss unten wirklich am Ball enden
         if thin:
             # Seitenansicht: Beine/Hose/Wand liefern lange Kanten -> nur duenne Linien (Schaft) zaehlen
             rs = ridge_score(blur_frame, x1, y1, x2, y2)
@@ -245,7 +270,8 @@ def detect_handedness(frames, ball, address, impact, ref=None):
     return ("LH" if right > left else "RH"), round(conf, 2)
 
 
-def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung"), thin=False):
+def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung"), thin=False,
+            side=False):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
     {"error": ...}. Zeiten in Sekunden im Clip.
@@ -271,9 +297,14 @@ def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Anspreche
         impact, ball = find_impact(frames, fps)
     if impact is None:
         return {"error": "Treffmoment nicht erkannt (Ball nicht sichtbar?)"}
-    res = {"impact_time": round(impact / fps, 4), "ball": [ball[0] / W, ball[1] / H], "lines": []}
+    res = {"impact_time": round(impact / fps, 4), "ball": [ball[0] / W, ball[1] / H], "lines": [],
+           "v": ANALYSIS_VERSION}
     e = motion_curve(frames, ball, fps)
     address = find_address(e, impact, fps)
+    if address is not None:
+        # langsamen Beginn des Rueckschwungs mitnehmen (sonst Ansprechen erst mitten im Ausholen)
+        e_slow = motion_curve(frames, ball, fps, lag=int(0.1 * fps))
+        address = refine_address(e_slow, address, impact, fps)
     head = (ball[0], ball[1])
     if address is None:
         res["address_error"] = "kein ruhiger Moment vor dem Rueckschwung gefunden"
@@ -301,14 +332,15 @@ def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Anspreche
                                      "color": "#4aa3ff", "label": labels[0], "from": 0.0,
                                      "extend": True, "auto": True, "frame_time": round(address / fps, 4)})
                 head = (x1, y1)
-    # Abschwung: einige Bilder vor dem Treffen, Referenz ~0,2 s frueher
+    # Abschwung: einige Bilder vor dem Treffen, Referenz ~0,2 s frueher.
+    # Seitenkamera: Schlaeger saust quer durchs Bild -> nur 1-3 Bilder vorher, und er muss am Ball enden.
     res["downswing_error"] = "Schaft vor dem Treffen nicht gefunden"
-    for k in (4, 3, 5, 6, 2, 8):
+    for k in ((2, 1, 3) if side else (4, 3, 5, 6, 2, 8)):
         d = impact - k
         r = impact - int(0.2 * fps)
         if r < 0:
             break
-        shaft = detect_shaft(frames[d], frames[r], ball, head, max_ang, thin)
+        shaft = detect_shaft(frames[d], frames[r], ball, head, max_ang, thin, near=0.12 if side else None)
         if shaft:
             x1, y1, x2, y2 = shaft
             res["lines"].append({"x1": x1 / W, "y1": y1 / H, "x2": x2 / W, "y2": y2 / H,

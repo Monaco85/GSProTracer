@@ -1,0 +1,23 @@
+{
+  "impact_time": 3.0777,
+  "handed": "RH",
+  "note": "Rechtshaender, Kamera hinten quer (1280x720). Linien am Bild geprueft (19.11.2026): Ansprechen bei 2,057 s liegt auf dem Schaft; vorher wurde faelschlich 2,26 s (mitten im Rueckschwung) genommen.",
+  "lines": [
+    {
+      "x1": 0.54609375,
+      "y1": 0.825,
+      "x2": 0.4078125,
+      "y2": 0.4791666666666667,
+      "label": "Ansprechen",
+      "from": 0.0
+    },
+    {
+      "x1": 0.5449102722772278,
+      "y1": 0.825,
+      "x2": 0.45390625,
+      "y2": 0.5736111111111111,
+      "label": "Abschwung",
+      "from": 3.061
+    }
+  ]
+}

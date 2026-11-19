@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 10
+EXPORT_VERSION = 11
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -133,6 +133,14 @@ def fix_orientation(ffmpeg, clip, mode="quer"):
             pass
     log.warning("Clip %s konnte nicht gedreht werden", clip)
     return None
+
+
+def _analysis_version():
+    try:
+        import swing_analysis
+        return swing_analysis.ANALYSIS_VERSION
+    except Exception:
+        return None
 
 
 def vb_trig(video):
@@ -258,7 +266,9 @@ class Exporter:
         except ValueError:
             return
         notes = self.store.read_json(sid, "notes.json") or {}
-        if "side_analysis" not in notes and self.cfg.data.get("auto_analysis", True):
+        sa_old = notes.get("side_analysis")
+        if self.cfg.data.get("auto_analysis", True) and (
+                sa_old is None or ("error" not in sa_old and sa_old.get("v") != _analysis_version())):
             try:
                 import swing_analysis
                 if swing_analysis.AVAILABLE:
@@ -266,7 +276,7 @@ class Exporter:
                     # Seitenansicht: Schaft steht steiler, Beine/Wand liefern Kanten -> nur duenne Linien
                     res = swing_analysis.analyze(self.store.path(sid, "clip_side.mp4"), vs.get("trigger_time"),
                                                  max_ang=89.5, window=5.0, labels=("Ansprechen", "Treffmoment"),
-                                                 thin=True)
+                                                 thin=True, side=True)
                 else:
                     res = None
             except Exception as e:
@@ -638,8 +648,9 @@ class Exporter:
         notes = self.store.read_json(sid, "notes.json") or {}
         ana = notes.get("analysis")
         first = ana is None
-        # aeltere Analysen ohne Schlaghand einmal nachholen (verwirft dabei nichts nachtraeglich)
-        redo = ana is not None and "handed" not in ana and "error" not in ana
+        # aeltere Analysen mit der verbesserten Erkennung einmal nachholen (verwirft dabei nichts nachtraeglich;
+        # von Hand gezogene Linien bleiben)
+        redo = ana is not None and "error" not in ana and ana.get("v") != _analysis_version()
         if self.cfg.data.get("auto_analysis", True) and (first or redo):
             notes = self._auto_analyze(sid, clip, notes, video)
             # nur vollstaendig erkannte Schuesse behalten (Treffmoment, Ansprech- und Schlaglinie) - nur neue

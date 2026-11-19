@@ -40,6 +40,10 @@ def main():
         print(f"== {sid}")
         if "error" in res:
             print("  FEHLER:", res["error"]); failed += 1; continue
+        if ref.get("handed"):
+            ok = res.get("handed") == ref["handed"]
+            failed += not ok
+            print(f"  Schlaghand   auto {res.get('handed')}  Referenz {ref['handed']}  {'OK' if ok else 'FALSCH'}")
         di = abs(res["impact_time"] - ref["impact_time"])
         ok = di <= 0.02
         failed += not ok
