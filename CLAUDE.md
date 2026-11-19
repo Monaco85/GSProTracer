@@ -45,11 +45,13 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
 - Nur vollständig erkannte Schüsse behalten (`only_complete_shots`), Verworfene nach `pc/verworfen/`.
 - Aufnahme 6 s vor dem R10-Trigger; Synchronisierung: Startsignal, dann Treffmoment, von Hand ±1 Bild.
 
-## Schwung-Check (Artefakt)
-<https://claude.ai/artifact/XcFQShjGLwsZquAwvmjS1Y> – Browser-Seite: Clips ablegen, MoveNet-Thunder-Posenerkennung (tfjs, Modell mitveröffentlicht
-als `movenet-thunder.json` + `movenet-thunder-weights.wasm`, `.bin` wird nicht ausgeliefert), Messwerte/Tipps je Schlägerart,
-„Claude fragen“ über die `sample`-Capability. Quelle lag im Scratchpad (`schwungcheck/index.html`) – bei Änderungen mit
-`Artifact read` holen. Stand 19.11.: Messwerte der Kamera hinten noch nicht an echten Clips verifiziert (lokal ohne GPU sehr langsam).
+## Schwung-Check (Körperanalyse)
+Lokal im Tracer: `pc/schwung.html` unter `/schwung` (Artefakt lief beim Nutzer nicht; Artefakt-Version
+<https://claude.ai/artifact/XcFQShjGLwsZquAwvmjS1Y> ist veraltet). MoveNet Thunder per tfjs/WebGL auf der GPU,
+Dateien in `pc/static/` (`tf.min.js`, `movenet-thunder.json/.bin`). Tracer-Schüsse: hinten + seitlich getrennt
+analysiert, Ansprechen/Treffmoment aus `notes.analysis` (Seite: über `sync.offset`), nur dieses Fenster dicht abgetastet.
+Getestet am Rechtshänder-Beispiel (Skelett passt in beiden Kameras); Richtwerte/Tipps sind Faustwerte, nicht validiert.
+Test-Hook: `window.__testN` (wenige Bilder, ohne GPU sonst sehr langsam), `window.__last` (letztes Ergebnis).
 
 ## Offene Punkte
 1. **Export dauert bei ihm > 1 min** (hier ~6 s Analyse + ~16 s Video + 8 s Wartezeit). Log-Zeilen mit Uhrzeiten

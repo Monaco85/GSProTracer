@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schwung-Check · GSPro Tracer</title>
+<style>
+/* Layout: Werkbank – links Clips, Mitte Video mit Skelett, rechts Einstellungen + Messwerte. Telefon: alles untereinander. */
+:root{
+  --bg:#f3f5f2; --surface:#ffffff; --surface2:#e9ede7; --line:#d3dad0;
+  --fg:#17201a; --muted:#5d6a60; --accent:#d9480f; --accent-fg:#ffffff; --turf:#2f6b45;
+  --ok:#2b8a3e; --warn:#b7791f; --bad:#c92a2a; --ok-bg:#e6f4ea; --warn-bg:#fbf1dd; --bad-bg:#fbe7e7;
+  --stage:#0d120f;
+  --f-display:"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --f-body:"Segoe UI", system-ui, sans-serif;
+  --f-mono:"Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111613; --surface:#18201b; --surface2:#202a23; --line:#2d3a31;
+  --fg:#e7ede8; --muted:#9aa89e; --accent:#ff6b2c; --accent-fg:#1a0d05; --turf:#5fae7b;
+  --ok:#5fc27a; --warn:#e3a740; --bad:#ff6b6b; --ok-bg:#1c3324; --warn-bg:#3a2f17; --bad-bg:#3d1d1d; --stage:#050806; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111613; --surface:#18201b; --surface2:#202a23; --line:#2d3a31;
+  --fg:#e7ede8; --muted:#9aa89e; --accent:#ff6b2c; --accent-fg:#1a0d05; --turf:#5fae7b;
+  --ok:#5fc27a; --warn:#e3a740; --bad:#ff6b6b; --ok-bg:#1c3324; --warn-bg:#3a2f17; --bad-bg:#3d1d1d; --stage:#050806; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px 24px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+header.top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+header.top h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
+header.top h1 span{color:var(--accent)}
+header.top p{margin:0;color:var(--muted);font-size:14px}
+
+.app{display:grid;grid-template-columns:250px minmax(0,1fr) 380px;gap:14px;align-items:start}
+@media (max-width:1100px){.app{grid-template-columns:minmax(0,1fr) 360px}.clips{grid-column:1/-1}}
+@media (max-width:760px){.app{grid-template-columns:minmax(0,1fr)}}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.clips{display:flex;flex-direction:column;gap:10px}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:16px 12px;text-align:center;color:var(--muted);transition:border-color .15s, background .15s;cursor:pointer}
+.drop strong{display:block;color:var(--fg);font-size:15px;margin-bottom:2px}
+.drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.drop small{font-size:12px}
+.cliplist{display:flex;flex-direction:column;gap:6px}
+.clip{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface2);width:100%}
+.clip.sel{border-color:var(--accent);box-shadow:inset 3px 0 var(--accent)}
+.clip .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.clip .m{grid-column:1/-1;font-size:12px;color:var(--muted)}
+.pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;align-self:start}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.warn{background:var(--warn-bg);color:var(--warn)} .pill.bad{background:var(--bad-bg);color:var(--bad)} .pill.idle{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+
+.stagewrap{display:flex;flex-direction:column;gap:10px;min-width:0}
+.stage{position:relative;background:var(--stage);border-radius:10px;overflow:hidden;aspect-ratio:16/9;max-width:100%;max-height:78vh;margin-inline:auto;display:flex;align-items:center;justify-content:center}
+.stage video{max-width:100%;max-height:100%;display:block}
+.stage canvas{position:absolute;pointer-events:none}
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#c9d3cb;padding:20px;text-align:center}
+.empty h2{font-size:20px;color:#fff}
+.empty p{margin:0;max-width:46ch;font-size:14px}
+.controls{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:6px 11px;font-weight:500}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);font-weight:700}
+.btn.on{background:var(--turf);border-color:var(--turf);color:#fff}
+.btn:disabled{opacity:.45;cursor:default}
+.phase{display:inline-flex;align-items:center;gap:6px}
+.time{margin-left:auto;color:var(--muted);font-size:13px}
+.gpu{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 10px}
+.gpu.ok{color:var(--ok);border-color:var(--ok)} .gpu.warn{color:var(--warn);border-color:var(--warn)}
+.views{display:inline-flex;gap:4px}
+
+.side{display:flex;flex-direction:column;gap:12px}
+.form{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center}
+.form select{border:1px solid var(--line);background:var(--surface2);border-radius:7px;padding:5px 8px;min-width:0;width:100%}
+.progress{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden}
+.progress div{height:100%;width:0;background:var(--accent);transition:width .2s}
+.status{font-size:13px;color:var(--muted);min-height:1.5em}
+.status.err{color:var(--bad)}
+
+.summary{border-left:4px solid var(--accent);padding:8px 12px;background:var(--surface2);border-radius:0 8px 8px 0}
+.summary h3{font-size:15px;margin-bottom:2px}
+.summary p{margin:0;font-size:14px}
+.view{display:flex;flex-direction:column;gap:6px}
+.view h3{font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.metric{display:grid;grid-template-columns:1fr auto auto;gap:4px 10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.metric .name{font-weight:600;font-size:14px;min-width:0}
+.metric .val{font-size:14px}
+.metric .tip{grid-column:1/-1;font-size:13px;color:var(--muted);margin:0}
+.metric .range{grid-column:1/-1;font-size:11px;color:var(--muted)}
+.claude{display:flex;flex-direction:column;gap:8px}
+.claude .out{white-space:pre-wrap;font-size:14px;line-height:1.55;background:var(--surface2);border-radius:8px;padding:10px 12px;max-height:420px;overflow:auto}
+.note{font-size:12px;color:var(--muted);margin:0}
+.example{position:relative}
+.example::after{content:"Beispiel";position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+input[type=file]{display:none}
+[hidden]{display:none!important}
+.pill.na{background:var(--surface2);color:var(--muted)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Schwung<span>-</span>Check</h1>
+  <p>Schuss wählen oder Video ablegen – Körperhaltung wird erkannt, Tipps passend zum Schläger.</p>
+  <span class="gpu mono" id="gpu">Rechner: noch nicht gestartet</span>
+  <a class="btn" href="/" style="margin-left:auto;text-decoration:none">← Analyse-Seite</a>
+</header>
+
+<div class="app">
+  <aside class="panel clips" aria-label="Clips">
+    <label class="label" for="shotSel">Schuss aus dem Tracer</label>
+    <select id="shotSel" class="btn" style="width:100%"><option value="">– Schuss wählen –</option></select>
+    <label class="drop" id="drop" for="file">
+      <strong>…oder Video hier ablegen</strong>
+      <small>MP4 vom Tracer: Export (beide Kameras), <code>clip.mp4</code> oder <code>clip_side.mp4</code>. Optional <code>shot.json</code> für Schläger und Schlaghand.</small>
+    </label>
+    <input type="file" id="file" accept="video/*,.mp4,.json" multiple>
+    <div class="cliplist" id="cliplist"></div>
+  </aside>
+
+  <main class="stagewrap">
+    <div class="stage" id="stage">
+      <video id="vid" playsinline muted preload="auto"></video>
+      <canvas id="ov"></canvas>
+      <div class="empty" id="empty">
+        <h2>Noch kein Schuss</h2>
+        <p>Links einen Schuss aus dem Tracer wählen (Kamera hinten und seitlich werden zusammen analysiert) oder ein Video ablegen. Danach „Analysieren“ – das Skelett liegt dann über dem Schwung, mit Ansprechen, Oben und Treffmoment.</p>
+      </div>
+    </div>
+    <div class="controls" role="group" aria-label="Wiedergabe">
+      <button class="btn" id="bPlay" disabled>▶ Abspielen</button>
+      <button class="btn" id="bPrev" disabled title="Ein Bild zurück">◀</button>
+      <button class="btn" id="bNext" disabled title="Ein Bild vor">▶</button>
+      <select class="btn" id="rate" aria-label="Tempo"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25" selected>¼×</option><option value="0.125">⅛×</option></select>
+      <span class="views" id="views"></span>
+      <span class="phase" id="phases"></span>
+      <span class="time mono" id="time">–</span>
+    </div>
+  </main>
+
+  <section class="side" aria-label="Analyse">
+    <div class="panel" id="setup">
+      <div class="form">
+        <label class="label" for="kind">Video</label>
+        <select id="kind"><option value="tracer">Schuss: Kamera hinten + seitlich</option><option value="export">Export: hinten + seitlich nebeneinander</option><option value="hinten">Nur Kamera hinten</option><option value="seitlich">Nur Kamera seitlich</option></select>
+        <label class="label" for="hand">Schlaghand</label>
+        <select id="hand"><option value="auto">automatisch erkennen</option><option value="RH">Rechtshänder</option><option value="LH">Linkshänder</option></select>
+        <label class="label" for="club">Schläger</label>
+        <select id="club"></select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+        <button class="btn primary" id="bAnalyze" disabled>Analysieren</button>
+        <span class="status" id="status"></span>
+      </div>
+      <div class="progress" style="margin-top:10px"><div id="prog"></div></div>
+    </div>
+    <div class="panel" id="results">
+      <div class="example" id="exampleCard">
+        <div class="summary"><h3>Wichtigster Ansatzpunkt</h3><p>Hüfte geht zum Ball (0,16 Rumpflängen) – beim Wedge Gesäß im Abschwung an der „Wand“ hinter dir lassen.</p></div>
+        <div class="view" style="margin-top:12px">
+          <h3>Kamera hinten <span class="label">LW · Rechtshänder</span></h3>
+          <div class="metric"><span class="name">Rückenwinkel beim Ansprechen</span><span class="val mono">41°</span><span class="pill ok">gut</span><p class="tip">Passt zum Wedge (Richtwert 36–48°).</p></div>
+          <div class="metric"><span class="name">Aufrichten bis Treffmoment</span><span class="val mono">7°</span><span class="pill warn">prüfen</span><p class="tip">Oberkörper richtet sich etwas auf – Brust über dem Ball lassen.</p></div>
+        </div>
+        <p class="note" style="margin-top:8px">So sehen die Ergebnisse aus. Lege einen Clip ab, um deinen Schwung zu prüfen.</p>
+      </div>
+      <div id="out" hidden></div>
+    </div>
+    <div class="panel claude" id="claudeBox" hidden>
+      <h3 style="font-size:15px">Ausführliche Tipps</h3>
+      <p class="note">Claude bekommt nur die Messwerte, Schläger und Schlaghand – keine Videos.</p>
+      <button class="btn" id="bClaude">Claude nach Tipps und Übungen fragen</button>
+      <div class="out" id="claudeOut" hidden></div>
+    </div>
+  </section>
+</div>
+
+<script src="/static/tf.min.js"></script>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const vid = $('#vid'), ov = $('#ov'), octx = ov.getContext('2d');
+
+// ---------------------------------------------------------------- Schläger
+const CLUBS = [
+  ['', 'unbekannt'], ['DR', 'Driver'], ['W3', 'Holz 3'], ['W5', 'Holz 5'], ['W7', 'Holz 7'],
+  ['H3', 'Hybrid 3'], ['H4', 'Hybrid 4'], ['H5', 'Hybrid 5'],
+  ['I3', 'Eisen 3'], ['I4', 'Eisen 4'], ['I5', 'Eisen 5'], ['I6', 'Eisen 6'], ['I7', 'Eisen 7'], ['I8', 'Eisen 8'], ['I9', 'Eisen 9'],
+  ['PW', 'Pitching Wedge'], ['AW', 'Gap Wedge (AW)'], ['GW', 'Gap Wedge'], ['SW', 'Sand Wedge'], ['LW', 'Lob Wedge']];
+$('#club').innerHTML = CLUBS.map(([k, n]) => `<option value="${k}">${n}${k ? ' (' + k + ')' : ''}</option>`).join('');
+function normClub(s) {
+  if (!s) return '';
+  s = String(s).toUpperCase();
+  if (s === '1W') return 'DR';
+  let m = s.match(/^(\d)W$/); if (m) return 'W' + m[1];
+  m = s.match(/^(\d)H$/); if (m) return 'H' + m[1];
+  m = s.match(/^(\d)I$/); if (m) return 'I' + m[1];
+  return CLUBS.some(c => c[0] === s) ? s : '';
+}
+function clubFromName(name) {
+  for (const tok of name.replace(/\.[^.]+$/, '').split(/[_\-\s.]+/)) { const c = normClub(tok); if (c) return c; }
+  return '';
+}
+function category(club) {
+  if (club === 'DR') return 'driver';
+  if (/^W/.test(club)) return 'holz';
+  if (/^H/.test(club)) return 'hybrid';
+  if (/^I/.test(club)) return 'eisen';
+  if (/W$/.test(club)) return 'wedge';
+  return 'eisen';
+}
+const CAT_NAME = { driver: 'Driver', holz: 'Holz', hybrid: 'Hybrid', eisen: 'Eisen', wedge: 'Wedge' };
+
+// ---------------------------------------------------------------- Clips
+const clips = [];
+let cur = null, pendingJson = null;
+function addFiles(files) {
+  const vids = [], jsons = [];
+  for (const f of files) (/\.json$/i.test(f.name) ? jsons : vids).push(f);
+  Promise.all(jsons.map(f => f.text().then(t => { try { return JSON.parse(t); } catch (e) { return null; } }))).then(js => {
+    const shot = js.find(j => j && (j.club || j.player || j.payload)) || null;
+    if (shot) pendingJson = shot;
+    for (const f of vids) {
+      const name = f.name;
+      const kind = /side/i.test(name) ? 'seitlich' : /^clip/i.test(name) ? 'hinten' : 'export';
+      const club = clubFromName(name) || normClub(shot && (shot.club || (shot.player || {}).Club)) || '';
+      const c = { id: Math.random().toString(36).slice(2), name, url: URL.createObjectURL(f), kind, club,
+        hand: 'auto', gsHand: shot && shot.player && shot.player.Handed || null, tracks: null, worst: null };
+      clips.push(c);
+    }
+    if (!vids.length && shot && cur) {          // nur shot.json nachgereicht -> auf den aktuellen Clip anwenden
+      cur.club = cur.club || normClub(shot.club || (shot.player || {}).Club);
+      cur.gsHand = (shot.player || {}).Handed || cur.gsHand;
+    }
+    renderList();
+    if (vids.length) select(clips[clips.length - vids.length].id);
+    else if (cur) syncForm();
+  });
+}
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === 'drop' || !e.relatedTarget) drop.classList.remove('over'); }));
+document.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
+$('#file').addEventListener('change', e => { addFiles([...e.target.files]); e.target.value = ''; });
+
+// ---------------------------------------------------------------- Schuesse aus dem Tracer
+let shotList = [];
+async function loadShots() {
+  try { shotList = await (await fetch('/api/shots', { cache: 'no-store' })).json(); } catch (e) { shotList = []; }
+  const sel = $('#shotSel'), keep = sel.value;
+  sel.innerHTML = '<option value="">– Schuss wählen –</option>' + shotList.filter(x => x.has_video).map(x => {
+    const r = x.shot || {}, b = ((r.payload || {}).BallData) || {};
+    const m = x.id.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/) || [];
+    const when = m[0] ? `${m[3]}.${m[2]}. ${m[4]}:${m[5]}` : x.id;
+    return `<option value="${x.id}">${when} · ${r.club || '?'}${b.Speed ? ' · ' + b.Speed.toFixed(0) + ' mph' : ''}${x.has_side ? ' · 2 Kameras' : ''}</option>`;
+  }).join('');
+  sel.value = keep;
+}
+function openShot(id) {
+  const x = shotList.find(s => s.id === id); if (!x) return;
+  const existing = clips.find(c => c.shotId === id);
+  if (existing) return select(existing.id);
+  const r = x.shot || {};
+  const off = x.sync && typeof x.sync.offset === 'number' ? x.sync.offset
+    : ((x.video || {}).trigger_time != null && (x.video_side || {}).trigger_time != null ? x.video.trigger_time - x.video_side.trigger_time : 0);
+  const sources = [{ url: `/shots/${id}/clip.mp4`, view: 'hinten', offset: 0 }];
+  if (x.has_side) sources.push({ url: `/shots/${id}/clip_side.mp4`, view: 'seitlich', offset: off });
+  const an = (x.notes || {}).analysis || {};
+  const imp = (x.notes || {}).impact_time != null ? x.notes.impact_time : an.impact_time;
+  const tracerPhases = an.address_time != null && imp != null ? { address: an.address_time, impact: imp } : null;
+  const c = { id: 'shot-' + id, shotId: id, tracerPhases, name: `Schuss ${id}`, url: sources[0].url, sources, showSrc: 0, kind: 'tracer',
+    club: normClub(r.club || (r.player || {}).Club), hand: 'auto', gsHand: (r.player || {}).Handed || null, tracks: null, worst: null };
+  clips.push(c); renderList(); select(c.id);
+}
+$('#shotSel').addEventListener('change', e => { if (e.target.value) openShot(e.target.value); });
+loadShots().then(() => { const q = new URLSearchParams(location.search).get('shot'); if (q) { $('#shotSel').value = q; openShot(q); } });
+
+function renderList() {
+  $('#cliplist').innerHTML = clips.map(c => {
+    const st = c.worst ? `<span class="pill ${c.worst.cls}">${c.worst.cls === 'ok' ? 'gut' : c.worst.cls === 'warn' ? 'prüfen' : 'optimieren'}</span>` : `<span class="pill idle">neu</span>`;
+    const club = c.club ? (CLUBS.find(k => k[0] === c.club) || [, c.club])[1] : 'Schläger ?';
+    const kind = { tracer: c.sources.length > 1 ? 'hinten + seitlich' : 'hinten', export: 'Export, beide Kameras', hinten: 'hinten', seitlich: 'seitlich' }[c.kind];
+    return `<button class="clip ${cur && cur.id === c.id ? 'sel' : ''}" data-id="${c.id}"><span class="n" title="${c.name}">${c.name}</span>${st}<span class="m">${club} · ${kind}</span></button>`;
+  }).join('');
+}
+$('#cliplist').addEventListener('click', e => { const b = e.target.closest('.clip'); if (b) select(b.dataset.id); });
+
+function syncForm() {
+  $('#kind').value = cur.kind; $('#hand').value = cur.hand; $('#club').value = cur.club || '';
+}
+function select(id) {
+  cur = clips.find(c => c.id === id); if (!cur) return;
+  renderList(); syncForm();
+  $('#empty').hidden = true;
+  const srcs = cur.sources || [{ url: cur.url }];
+  cur.showSrc = Math.min(cur.showSrc || 0, srcs.length - 1);
+  vid.src = srcs[cur.showSrc].url; vid.playbackRate = +$('#rate').value;
+  $('#kind').disabled = cur.kind === 'tracer';
+  renderViews();
+  ['#bPlay', '#bPrev', '#bNext', '#bAnalyze'].forEach(s => $(s).disabled = false);
+  vid.onloadedmetadata = () => { fit(); const tr = shownTracks()[0]; if (tr) { jump(tr.phases.address); } else vid.currentTime = Math.min(0.05, vid.duration || 0); };
+  renderResults();
+  setStatus(cur.tracks ? '' : 'Bereit – „Analysieren“ erkennt die Körperpunkte (dauert je nach Rechner 10–40 s).');
+}
+['kind', 'hand', 'club'].forEach(k => $('#' + k).addEventListener('change', e => {
+  if (!cur) return;
+  cur[k] = e.target.value;
+  if (k === 'kind') { cur.tracks = null; cur.worst = null; setStatus('Videotyp geändert – bitte neu analysieren.'); }
+  else if (cur.tracks) computeAll(cur);
+  renderList(); renderResults(); draw();
+}));
+
+// ---------------------------------------------------------------- Wiedergabe
+// Spuren, die zum gerade gezeigten Video gehoeren (Schuss: hinten ODER seitlich; Export: beide Haelften)
+const shownTracks = () => cur && cur.tracks ? cur.tracks.filter(tr => !cur.sources || tr.src === (cur.showSrc || 0)) : [];
+function renderViews() {
+  const v = $('#views');
+  if (!cur || !cur.sources || cur.sources.length < 2) { v.innerHTML = ''; return; }
+  v.innerHTML = cur.sources.map((s, i) => `<button class="btn ${i === (cur.showSrc || 0) ? 'on' : ''}" data-i="${i}">${s.view}</button>`).join('');
+}
+$('#views').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || !cur) return;
+  const keepPhase = $('#phases').dataset.last;
+  cur.showSrc = +b.dataset.i; renderViews();
+  vid.src = cur.sources[cur.showSrc].url;
+  vid.onloadedmetadata = () => { fit(); const tr = shownTracks()[0]; if (tr) jump(tr.phases[keepPhase || 'address']); };
+  renderPhases();
+});
+const fit = () => {
+  if (vid.videoWidth) {
+    const ar = `${vid.videoWidth}/${vid.videoHeight}`, st = $('#stage');
+    if (st.dataset.ar !== ar) { st.dataset.ar = ar; st.style.aspectRatio = ar; return requestAnimationFrame(fit); }
+  }
+  const r = vid.getBoundingClientRect(), s = $('#stage').getBoundingClientRect();
+  ov.width = Math.round(r.width * devicePixelRatio); ov.height = Math.round(r.height * devicePixelRatio);
+  ov.style.width = r.width + 'px'; ov.style.height = r.height + 'px';
+  ov.style.left = (r.left - s.left) + 'px'; ov.style.top = (r.top - s.top) + 'px';
+  draw();
+};
+window.addEventListener('resize', fit);
+$('#rate').addEventListener('change', e => vid.playbackRate = +e.target.value);
+$('#bPlay').onclick = () => vid.paused ? vid.play() : vid.pause();
+vid.addEventListener('play', () => { $('#bPlay').textContent = '❚❚ Pause'; loop(); });
+vid.addEventListener('pause', () => $('#bPlay').textContent = '▶ Abspielen');
+const step = d => { vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration, vid.currentTime + d)); };
+$('#bPrev').onclick = () => step(-1 / 30); $('#bNext').onclick = () => step(1 / 30);
+vid.addEventListener('seeked', draw); vid.addEventListener('timeupdate', draw);
+function loop() { draw(); if (!vid.paused && !vid.ended) requestAnimationFrame(loop); }
+function jump(t) { vid.pause(); vid.currentTime = t; }
+
+// ---------------------------------------------------------------- Pose-Modell (MoveNet Thunder, lokal mitgeliefert)
+let model = null;
+function showGpu() {
+  const el = $('#gpu');
+  let txt = tf.getBackend(), gpu = false;
+  try {
+    const gl = tf.backend().gpgpu && tf.backend().gpgpu.gl;
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    if (gl) { txt = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); gpu = !/swiftshader|software|llvmpipe|basic render/i.test(txt); }
+  } catch (e) {}
+  el.textContent = 'Rechnet auf: ' + (txt || '?').replace(/^ANGLE \((.*)\)$/, '$1').slice(0, 70);
+  el.className = 'gpu mono ' + (gpu ? 'ok' : 'warn');
+  if (!gpu) el.title = 'Keine Grafikkarte erkannt – in Chrome/Edge unter Einstellungen > System „Grafikbeschleunigung verwenden“ einschalten.';
+}
+async function loadModel() {
+  if (model) return model;
+  if (!window.tf) throw new Error('TensorFlow.js konnte nicht geladen werden.');
+  try { await tf.setBackend('webgl'); } catch (e) { await tf.setBackend('cpu'); }
+  await tf.ready();
+  model = await tf.loadGraphModel('/static/movenet-thunder.json');
+  showGpu();
+  return model;
+}
+const IN = 256, inCv = document.createElement('canvas'); inCv.width = inCv.height = IN;
+const avid = document.createElement('video'); avid.muted = true; avid.playsInline = true; avid.preload = 'auto';
+const inCtx = inCv.getContext('2d', { willReadFrequently: true });
+async function estimate(region, crop) {
+  // Ausschnitt (Quadrat in Videokoordinaten) auf 256x256 bringen, Rest schwarz; nichts aus der Nachbarregion
+  inCtx.fillStyle = '#000'; inCtx.fillRect(0, 0, IN, IN);
+  const x0 = Math.max(crop.x, region.x), y0 = Math.max(crop.y, region.y);
+  const x1 = Math.min(crop.x + crop.s, region.x + region.w), y1 = Math.min(crop.y + crop.s, region.y + region.h);
+  if (x1 > x0 && y1 > y0) {
+    const k = IN / crop.s;
+    inCtx.drawImage(avid, x0, y0, x1 - x0, y1 - y0, (x0 - crop.x) * k, (y0 - crop.y) * k, (x1 - x0) * k, (y1 - y0) * k);
+  }
+  const out = tf.tidy(() => model.execute(tf.browser.fromPixels(inCv).toInt().expandDims(0)));
+  const d = await out.data(); out.dispose();
+  const kp = [];
+  for (let i = 0; i < 17; i++) kp.push([crop.x + d[i * 3 + 1] * crop.s, crop.y + d[i * 3] * crop.s, d[i * 3 + 2]]);
+  return kp;
+}
+function fullCrop(r) { const s = Math.max(r.w, r.h); return { x: r.x + r.w / 2 - s / 2, y: r.y + r.h / 2 - s / 2, s }; }
+function nextCrop(kp, r) {
+  const good = kp.filter(p => p[2] > 0.25);
+  if (good.length < 7) return fullCrop(r);
+  const xs = good.map(p => p[0]), ys = good.map(p => p[1]);
+  const bx = (Math.min(...xs) + Math.max(...xs)) / 2, by = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const s = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.55;
+  const smin = 0.3 * Math.min(r.w, r.h), smax = Math.max(r.w, r.h);
+  const ss = Math.min(smax, Math.max(smin, s));
+  return { x: bx - ss / 2, y: by - ss / 2, s: ss };
+}
+function seek(t) {
+  return new Promise(res => {
+    const done = () => { avid.removeEventListener('seeked', done); clearTimeout(to); res(); };
+    const to = setTimeout(done, 1500);
+    avid.addEventListener('seeked', done); avid.currentTime = t;
+  });
+}
+
+// ---------------------------------------------------------------- Analyse
+let busy = false;
+$('#bAnalyze').onclick = () => analyze(cur);
+async function analyze(c) {
+  if (busy || !c) return;
+  busy = true; $('#bAnalyze').disabled = true; vid.pause();
+  try {
+    setStatus('Lade Körpererkennung …'); setProg(0.02);
+    await loadModel();
+    const sources = c.sources || [{ url: c.url, view: c.kind }];
+    const tracks = [];
+    let done = 0;
+    for (const src of sources) {
+      avid.src = src.url;
+      await new Promise((res, rej) => { avid.onloadedmetadata = res; avid.onerror = () => rej(new Error('Video nicht lesbar: ' + (src.view || ''))); });
+      const W = avid.videoWidth, H = avid.videoHeight, D = avid.duration;
+      let regions;
+      if (src.view === 'export') {
+        const split = W / H > 1.9 ? Math.min(W - 64, Math.round(H * 16 / 9)) : Math.round(W * 0.68);
+        regions = [{ x: 0, y: 0, w: split, h: H, view: 'hinten' }, { x: split, y: 0, w: W - split, h: H, view: 'seitlich' }];
+      } else regions = [{ x: 0, y: 0, w: W, h: H, view: src.view }];
+      let t0 = 0, t1 = D;
+      if (c.tracerPhases) {           // nur der Schwung: kurz vor dem Ansprechen bis nach dem Treffen, dafuer dicht
+        t0 = Math.max(0, c.tracerPhases.address - (src.offset || 0) - 0.5);
+        t1 = Math.min(D, c.tracerPhases.impact - (src.offset || 0) + 0.8);
+      }
+      const N = window.__testN || Math.max(60, Math.min(170, Math.round((t1 - t0) * (c.tracerPhases ? 90 : 30))));
+      const trs = regions.map(r => ({ region: r, view: r.view, src: sources.indexOf(src), offset: src.offset || 0, samples: [], crop: fullCrop(r) }));
+      for (let i = 0; i < N; i++) {
+        const t = t0 + (t1 - t0) * (i + 0.5) / N;
+        await seek(t);
+        for (const tr of trs) {
+          let kp = await estimate(tr.region, tr.crop);
+          if (kp.filter(p => p[2] > 0.25).length < 7 && tr.crop.s < Math.max(tr.region.w, tr.region.h)) {
+            tr.crop = fullCrop(tr.region); kp = await estimate(tr.region, tr.crop);
+          }
+          tr.samples.push({ t, kp });
+          tr.crop = nextCrop(kp, tr.region);
+        }
+        done++;
+        const total = sources.length * N;
+        setProg(0.05 + 0.9 * done / total);
+        if (i % 10 === 0) setStatus(`Erkenne Körperpunkte (${src.view === 'export' ? 'beide Kameras' : 'Kamera ' + src.view}) … ${Math.round(100 * (i + 1) / N)} %`);
+      }
+      tracks.push(...trs);
+    }
+    tracks.forEach(smoothTrack);
+    c.tracks = tracks;
+    computeAll(c);
+    window.__last = c;
+    setProg(1); setStatus('Fertig.');
+    renderList(); renderResults();
+    const tr0 = shownTracks()[0]; if (tr0) jump(tr0.phases.address);
+  } catch (e) {
+    console.error(e);
+    setStatus('Analyse fehlgeschlagen: ' + (e && e.message || e) + ' – anderen Clip oder Browser (Chrome/Edge) versuchen.', true);
+  } finally { busy = false; $('#bAnalyze').disabled = !cur; }
+}
+function smoothTrack(tr) {
+  const S = tr.samples;
+  for (let k = 0; k < 17; k++) for (let i = 1; i < S.length - 1; i++) {
+    const a = S[i - 1].kp[k], b = S[i].kp[k], c = S[i + 1].kp[k];
+    if (a[2] > 0.2 && b[2] > 0.2 && c[2] > 0.2) {
+      b[3] = med(a[0], b[0], c[0]); b[4] = med(a[1], b[1], c[1]);
+    }
+  }
+  S.forEach(s => s.kp.forEach(p => { if (p[3] != null) { p[0] = p[3]; p[1] = p[4]; } }));
+}
+const med = (a, b, c) => Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+
+// ---------------------------------------------------------------- Phasen und Messwerte
+const P = { nose: 0, ls: 5, rs: 6, le: 7, re: 8, lw: 9, rw: 10, lh: 11, rh: 12, lk: 13, rk: 14, la: 15, ra: 16 };
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.min(a[2], b[2])];
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+function handsAt(kp) {
+  const a = kp[P.lw], b = kp[P.rw];
+  if (a[2] > 0.2 && b[2] > 0.2) return mid(a, b);
+  return a[2] >= b[2] ? a : b;
+}
+function phases(tr) {
+  const S = tr.samples, n = S.length;
+  const hy = S.map(s => handsAt(s.kp)[1]), hx = S.map(s => handsAt(s.kp)[0]);
+  const torso = median(S.map(s => dist(mid(s.kp[P.ls], s.kp[P.rs]), mid(s.kp[P.lh], s.kp[P.rh]))).filter(v => v > 5)) || 100;
+  // Treffmoment: schnellste Handbewegung (Abschwung), dort die tiefste Handposition
+  let vmax = -1, iv = Math.floor(n / 2);
+  for (let i = 1; i < n - 1; i++) { const v = Math.hypot(hx[i + 1] - hx[i - 1], hy[i + 1] - hy[i - 1]); if (v > vmax) { vmax = v; iv = i; } }
+  let imp = iv;
+  for (let i = Math.max(1, iv - 4); i <= Math.min(n - 1, iv + 4); i++) if (hy[i] > hy[imp]) imp = i;
+  // Oben: Haende am hoechsten vor dem Treffmoment
+  let top = 0;
+  for (let i = 0; i < imp; i++) if (hy[i] < hy[top]) top = i;
+  // Ansprechen: letzte Position vor dem Rueckschwung, Haende tief (wie beim Ansprechen)
+  let low = -Infinity; for (let i = 0; i < top; i++) low = Math.max(low, hy[i]);
+  let addr = 0;
+  for (let i = top - 1; i >= 0; i--) if (hy[i] >= low - 0.07 * torso) { addr = i; break; }
+  const fin = n - 1;
+  return { addressI: addr, topI: top, impactI: imp, finishI: fin, torso,
+    address: S[addr].t, top: S[top].t, impact: S[imp].t, finish: S[fin].t };
+}
+// Ansprechen und Treffmoment kennt der Tracer schon genau (Bildanalyse am Ball) -> uebernehmen, Oben = Haende am hoechsten
+function phasesFromTracer(tr, tp) {
+  const S = tr.samples, n = S.length, off = tr.offset || 0;
+  const near = t => { let k = 0; S.forEach((s, i) => { if (Math.abs(s.t - t) < Math.abs(S[k].t - t)) k = i; }); return k; };
+  const a = near(tp.address - off), imp = near(tp.impact - off);
+  let top = a;
+  for (let i = a; i < imp; i++) if (handsAt(S[i].kp)[1] < handsAt(S[top].kp)[1]) top = i;
+  const torso = median(S.map(s => dist(mid(s.kp[P.ls], s.kp[P.rs]), mid(s.kp[P.lh], s.kp[P.rh]))).filter(v => v > 5)) || 100;
+  return { addressI: a, topI: top, impactI: imp, finishI: n - 1, torso,
+    address: S[a].t, top: S[top].t, impact: S[imp].t, finish: S[n - 1].t };
+}
+function median(a) { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
+const deg = r => r * 180 / Math.PI;
+function angle3(a, b, c) { // Winkel bei b
+  const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+  return deg(Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1)))));
+}
+function detectHand(tr) {
+  const kp = tr.samples[tr.phases.addressI].kp;
+  if (tr.view === 'hinten') {     // von hinten: Haende liegen Richtung Ball vor der Huefte
+    const h = handsAt(kp), hip = mid(kp[P.lh], kp[P.rh]);
+    return h[0] > hip[0] ? 'RH' : 'LH';
+  }
+  // von vorne: hintere (Trail-)Schulter haengt beim Ansprechen tiefer; Rechtshaender: Trail-Schulter links im Bild
+  const a = kp[P.ls], b = kp[P.rs];
+  const leftImg = a[0] < b[0] ? a : b, rightImg = a[0] < b[0] ? b : a;
+  return leftImg[1] > rightImg[1] ? 'RH' : 'LH';
+}
+
+// Richtwerte je Schlaegerart: [von, bis] fuer "gut"; ausserhalb um die halbe Bandbreite = "pruefen"
+const R = {
+  spineAddr: { driver: [30, 42], holz: [32, 44], hybrid: [33, 45], eisen: [34, 46], wedge: [36, 48] },
+  spineLoss: { all: [-4, 5] }, hipToBall: { all: [-0.06, 0.07] }, headHeight: { all: [-0.06, 0.06] },
+  knee: { all: [145, 165] },
+  stance: { driver: [1.1, 1.45], holz: [1.0, 1.35], hybrid: [0.95, 1.25], eisen: [0.85, 1.15], wedge: [0.65, 1.0] },
+  tilt: { driver: [7, 15], holz: [5, 12], hybrid: [4, 10], eisen: [2, 8], wedge: [0, 6] },
+  sway: { all: [-0.05, 0.12] },
+  hipShift: { driver: [0.02, 0.25], holz: [0.05, 0.28], hybrid: [0.06, 0.3], eisen: [0.08, 0.32], wedge: [0.1, 0.35] },
+  headImp: { driver: [-0.15, 0.03], holz: [-0.12, 0.06], hybrid: [-0.1, 0.1], eisen: [-0.1, 0.12], wedge: [-0.08, 0.15] },
+};
+const rng = (k, cat) => R[k][cat] || R[k].all;
+function rate(v, [lo, hi]) {
+  if (v >= lo && v <= hi) return 'ok';
+  const pad = (hi - lo) * 0.5;
+  return (v >= lo - pad && v <= hi + pad) ? 'warn' : 'bad';
+}
+const fmt = (v, d = 0) => (v == null || isNaN(v)) ? '–' : v.toFixed(d).replace('.', ',');
+
+function computeAll(c) {
+  const cat = category(c.club);
+  for (const tr of c.tracks) tr.phases = c.tracerPhases ? phasesFromTracer(tr, c.tracerPhases) : phases(tr);
+  // Mehrere Spuren: Phasen aus der Spur mit den sichersten Haenden (meist seitlich) uebernehmen.
+  // Gemeinsame Zeit = Zeit der Kamera hinten; Seitenkamera: t_hinten = t_seitlich + offset (Synchronisierung)
+  if (c.tracks.length > 1 && !c.tracerPhases) {
+    const conf = tr => median(tr.samples.map(s => Math.max(s.kp[P.lw][2], s.kp[P.rw][2])));
+    const best = [...c.tracks].sort((x, y) => conf(y) - conf(x))[0];
+    const nearest = (tr, t) => { let k = 0; tr.samples.forEach((s, i) => { if (Math.abs(s.t - t) < Math.abs(tr.samples[k].t - t)) k = i; }); return k; };
+    for (const tr of c.tracks) if (tr !== best) {
+      const map = t => t + (best.offset || 0) - (tr.offset || 0);
+      const ph = { torso: tr.phases.torso };
+      for (const k of ['address', 'top', 'impact', 'finish']) {
+        const i = nearest(tr, map(best.phases[k]));
+        ph[k + 'I'] = i; ph[k] = tr.samples[i].t;
+      }
+      ph.addressI = ph.addressI; tr.phases = ph;
+    }
+  }
+  // Schlaghand: Auswahl, sonst aus der Kamera hinten (zuverlaessiger), sonst seitlich
+  const detected = (c.tracks.find(t => t.view === 'hinten') || c.tracks[0]);
+  c.handDetected = detectHand(detected);
+  c.handUsed = c.hand === 'auto' ? c.handDetected : c.hand;
+  const RH = c.handUsed === 'RH';
+  const all = [];
+  for (const tr of c.tracks) {
+    const { addressI: a, topI: t, impactI: i, torso: L } = tr.phases, S = tr.samples;
+    const A = S[a].kp, T = S[t].kp, I = S[i].kp;
+    PH = { A, T, I };
+    const m = [];
+    if (tr.view === 'hinten') {
+      const dir = RH ? 1 : -1;     // Richtung Ball im Bild
+      const spine = kp => { const h = mid(kp[P.lh], kp[P.rh]), s = mid(kp[P.ls], kp[P.rs]); return deg(Math.atan2(Math.abs(s[0] - h[0]), h[1] - s[1])); };
+      const sA = spine(A), sI = spine(I);
+      const hipA = mid(A[P.lh], A[P.rh]), hipI = mid(I[P.lh], I[P.rh]);
+      const kneeA = median([angle3(A[P.lh], A[P.lk], A[P.la]), angle3(A[P.rh], A[P.rk], A[P.ra])]);
+      m.push(metric('spineAddr', 'Rückenwinkel beim Ansprechen', sA, '°', 0, rng('spineAddr', cat), cat));
+      m.push(metric('spineLoss', 'Aufrichten bis Treffmoment', sA - sI, '°', 0, rng('spineLoss', cat), cat));
+      m.push(metric('hipToBall', 'Hüfte Richtung Ball bis Treffmoment', (hipI[0] - hipA[0]) * dir / L, ' RL', 2, rng('hipToBall', cat), cat));
+      m.push(metric('headHeight', 'Kopfhöhe bis Treffmoment', (I[P.nose][1] - A[P.nose][1]) / L, ' RL', 2, rng('headHeight', cat), cat));
+      m.push(metric('knee', 'Kniebeugung beim Ansprechen', kneeA, '°', 0, rng('knee', cat), cat));
+    } else {
+      const dir = RH ? 1 : -1;     // Richtung Ziel im Bild (Spieler schaut zur Kamera)
+      const shW = Math.abs(A[P.ls][0] - A[P.rs][0]) || 1;
+      const stance = Math.abs(A[P.la][0] - A[P.ra][0]) / shW;
+      const lead = (A[P.ls][0] - A[P.rs][0]) * dir > 0 ? A[P.ls] : A[P.rs], trail = lead === A[P.ls] ? A[P.rs] : A[P.ls];
+      const tilt = deg(Math.atan2(trail[1] - lead[1], Math.abs(trail[0] - lead[0])));
+      const hipA = mid(A[P.lh], A[P.rh]), hipI = mid(I[P.lh], I[P.rh]);
+      m.push(metric('stance', 'Standbreite (Füße ÷ Schultern)', stance, '×', 2, rng('stance', cat), cat));
+      m.push(metric('tilt', 'Schulterneigung beim Ansprechen', tilt, '°', 0, rng('tilt', cat), cat));
+      m.push(metric('sway', 'Kopf seitlich im Rückschwung', (T[P.nose][0] - A[P.nose][0]) * -dir / L, ' RL', 2, rng('sway', cat), cat));
+      m.push(metric('hipShift', 'Hüfte zum Ziel bis Treffmoment', (hipI[0] - hipA[0]) * dir / L, ' RL', 2, rng('hipShift', cat), cat));
+      m.push(metric('headImp', 'Kopf zum Ziel bis Treffmoment', (I[P.nose][0] - A[P.nose][0]) * dir / L, ' RL', 2, rng('headImp', cat), cat));
+    }
+    tr.metrics = m; all.push(...m);
+  }
+  PH = null;
+  const order = { bad: 2, warn: 1, ok: 0, na: -1 };
+  const worst = all.filter(x => x.cls === 'bad' || x.cls === 'warn').sort((x, y) => order[y.cls] - order[x.cls] || y.off - x.off)[0];
+  c.worst = worst || { cls: 'ok' };
+}
+// welche Koerperpunkte ein Wert braucht (in welchen Phasen) - sonst "nicht messbar"
+const NEED = {
+  spineAddr: [['A', [5, 6, 11, 12]]], spineLoss: [['A', [5, 6, 11, 12]], ['I', [5, 6, 11, 12]]],
+  hipToBall: [['A', [11, 12]], ['I', [11, 12]]], headHeight: [['A', [0]], ['I', [0]]],
+  knee: [['A', [11, 12, 13, 14, 15, 16]]], stance: [['A', [5, 6, 15, 16]]], tilt: [['A', [5, 6]]],
+  sway: [['A', [0]], ['T', [0]]], hipShift: [['A', [11, 12]], ['I', [11, 12]]], headImp: [['A', [0]], ['I', [0]]],
+};
+let PH = null;   // Koerperpunkte der Phasen fuer die Messbarkeits-Pruefung
+function measurable(key) {
+  return (NEED[key] || []).every(([ph, ids]) => ids.every(k => PH[ph][k][2] >= 0.3));
+}
+function metric(key, name, v, unit, d, r, cat) {
+  if (PH && !measurable(key) || !isFinite(v)) return { key, name, v: NaN, unit, d, r, cls: 'na', off: 0,
+    tip: 'Nicht messbar – die nötigen Körperpunkte sind in diesem Bild verdeckt oder außerhalb des Bildes.' };
+  const cls = rate(v, r);
+  const off = v < r[0] ? (r[0] - v) / (r[1] - r[0] || 1) : v > r[1] ? (v - r[1]) / (r[1] - r[0] || 1) : 0;
+  return { key, name, v, unit, d, r, cls, off, tip: tipFor(key, cls, v, r, cat) };
+}
+function tipFor(key, cls, v, [lo, hi], cat) {
+  const C = CAT_NAME[cat], low = v < lo;
+  if (cls === 'ok') return {
+    spineAddr: `Passt zum ${C} (Richtwert ${fmt(lo)}–${fmt(hi)}°).`, spineLoss: 'Haltung bleibt bis zum Treffmoment – gut.',
+    hipToBall: 'Hüfte bleibt hinten, kein Aufrichten Richtung Ball.', headHeight: 'Kopf bleibt auf gleicher Höhe.',
+    knee: 'Knie leicht gebeugt, athletisch.', stance: `Standbreite passt zum ${C}.`, tilt: `Schulterneigung passt zum ${C}.`,
+    sway: 'Kopf bleibt im Rückschwung ruhig.', hipShift: 'Gewicht kommt rechtzeitig auf die vordere Seite.',
+    headImp: cat === 'driver' ? 'Kopf bleibt hinter dem Ball – gut für den Driver.' : 'Kopf bleibt stabil über dem Ball.' }[key];
+  const T = {
+    spineAddr: low ? `Zu aufrecht für den ${C}: mehr aus der Hüfte nach vorne beugen, Gesäß nach hinten, Rücken gerade.`
+                   : `Sehr weit gebeugt: etwas aufrechter stehen, damit sich die Schultern frei drehen können.`,
+    spineLoss: low ? 'Oberkörper beugt sich im Abschwung weiter nach vorne – Neigung halten statt „abtauchen“.'
+                   : `Oberkörper richtet sich zum Treffmoment auf (${fmt(v)}°). Brust über dem Ball lassen, Hüfte dreht statt nach vorne zu schieben – Übung: Gesäß an einer Wand/Stuhllehne hinter dir halten.`,
+    hipToBall: low ? 'Hüfte geht nach hinten weg – meist unkritisch, auf Gleichgewicht achten.'
+                   : `Hüfte schiebt Richtung Ball (${fmt(v, 2)} Rumpflängen) – typisches „Early Extension“. Im Abschwung linke Gesäßhälfte (Rechtsh.) nach hinten drehen, Fersen-Druck behalten.`,
+    headHeight: low ? 'Kopf hebt sich zum Treffmoment – oft Aufrichten. Blick bis nach dem Treffen auf die Ballrückseite.'
+                    : 'Kopf sinkt zum Treffmoment ab – Kniebeugung im Abschwung nicht vergrößern.',
+    knee: low ? 'Knie sehr stark gebeugt – etwas aufrechter, Gewicht über die Fußmitte.' : 'Beine fast gestreckt – Knie leicht beugen für eine stabile Basis.',
+    stance: low ? `Stand eher schmal für den ${C} (Richtwert ${fmt(lo, 2)}–${fmt(hi, 2)}×) – ${cat === 'driver' || cat === 'holz' ? 'für mehr Stabilität breiter stellen.' : 'etwas breiter stellen.'}`
+                : `Stand eher breit für den ${C} – ${cat === 'wedge' ? 'bei kurzen Schlägen Füße enger, das erleichtert die Drehung.' : 'etwas schmaler, damit die Hüfte drehen kann.'}`,
+    tilt: low ? (cat === 'driver' ? 'Schultern fast waagerecht – beim Driver hintere Schulter tiefer (Ball weiter vorne), das hilft dem Aufwärtsschlag.' : 'Schultern zu waagerecht oder hintere Schulter höher – Ballposition und Griff prüfen.')
+              : (cat === 'wedge' || cat === 'eisen' ? `Hintere Schulter hängt zu tief für den ${C} – Ball evtl. zu weit vorne; führt zu dünnen/fetten Treffern.` : 'Starke Neigung – Ballposition prüfen.'),
+    sway: low ? 'Kopf wandert im Rückschwung Richtung Ziel („Reverse Pivot“) – Gewicht im Rückschwung auf die hintere Seite drehen.'
+              : `Kopf schiebt im Rückschwung weg vom Ziel (${fmt(v, 2)} RL) – drehen statt schieben, hinteres Knie stabil halten.`,
+    hipShift: low ? `Zu wenig Gewichtsverlagerung zum Ziel (${fmt(v, 2)} RL) – ${cat === 'driver' ? 'auch beim Driver Hüfte im Abschwung zuerst leicht zum Ziel bewegen.' : 'Abschwung mit der Hüfte einleiten, Gewicht beim Treffmoment auf dem vorderen Fuß (Eisen/Wedge ca. 60–70 %).'}`
+                  : 'Hüfte schiebt stark zum Ziel – mehr drehen statt schieben.',
+    headImp: low ? 'Kopf bleibt sehr weit hinten – Gewicht hängt evtl. hinten, Hüfte zum Ziel drehen.'
+                 : (cat === 'driver' ? 'Kopf geht beim Driver vor den Ball – Kopf hinter dem Ball lassen, sonst steiler Eintreffwinkel.' : 'Kopf wandert zum Ziel vor – Kopf über dem Ball halten.'),
+  };
+  return T[key];
+}
+
+// ---------------------------------------------------------------- Anzeige
+function renderResults() {
+  const out = $('#out'), ex = $('#exampleCard');
+  const has = cur && cur.tracks;
+  ex.hidden = !!has; out.hidden = !has; $('#claudeBox').hidden = !has;
+  renderPhases();
+  if (!has) { out.innerHTML = ''; return; }
+  const club = cur.club ? (CLUBS.find(k => k[0] === cur.club) || [, cur.club])[1] : 'Schläger unbekannt – Richtwerte Eisen';
+  const handTxt = { RH: 'Rechtshänder', LH: 'Linkshänder' }[cur.handUsed];
+  const gs = cur.gsHand && cur.hand === 'auto' && cur.gsHand !== cur.handDetected
+    ? ` <span class="pill warn" title="GSPro-Spielerprofil sagt ${cur.gsHand}">GSPro: ${cur.gsHand}</span>` : '';
+  const w = cur.worst && cur.worst.name ? `<div class="summary"><h3>Wichtigster Ansatzpunkt</h3><p><b>${cur.worst.name}:</b> ${cur.worst.tip}</p></div>`
+    : `<div class="summary"><h3>Sieht gut aus</h3><p>Alle Messwerte liegen im Richtbereich für ${club}.</p></div>`;
+  const views = cur.tracks.map(tr => `<div class="view" style="margin-top:14px"><h3>${tr.view === 'hinten' ? 'Kamera hinten' : 'Kamera seitlich'} <span class="label">${tr.view === 'hinten' ? 'Down-the-Line' : 'Face-On'}</span></h3>` +
+    tr.metrics.map(m => `<div class="metric"><span class="name">${m.name}</span><span class="val mono">${fmt(m.v, m.d)}${m.unit}</span><span class="pill ${m.cls}">${{ ok: 'gut', warn: 'prüfen', bad: 'optimieren', na: 'n. m.' }[m.cls]}</span><p class="tip">${m.tip}</p><span class="range mono">Richtwert ${fmt(m.r[0], m.d)} bis ${fmt(m.r[1], m.d)}${m.unit}</span></div>`).join('') + `</div>`).join('');
+  out.innerHTML = `<p class="label" style="margin:0 0 8px">${club} · ${handTxt}${cur.hand === 'auto' ? ' (erkannt)' : ''}${gs}</p>` + w + views +
+    `<p class="note" style="margin-top:10px">RL = Rumpflängen (Schulter- bis Hüftmitte). Gemessen in 2D aus dem Video – Richtwerte, keine Laborwerte. Kamera möglichst auf Hüfthöhe, hinten genau auf der Ziellinie, seitlich im rechten Winkel.</p>`;
+}
+function renderPhases() {
+  const tr0 = shownTracks()[0], ph = tr0 ? tr0.phases : null;
+  $('#phases').innerHTML = ph ? [['address', 'Ansprechen'], ['top', 'Oben'], ['impact', 'Treffmoment'], ['finish', 'Finish']]
+    .map(([k, n]) => `<button class="btn" data-k="${k}" data-t="${ph[k]}">${n}</button>`).join('') : '';
+}
+$('#phases').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { $('#phases').dataset.last = b.dataset.k; jump(+b.dataset.t); } });
+
+const EDGES = [[5, 6], [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [0, 5], [0, 6]];
+function kpAt(tr, t) {
+  const S = tr.samples; if (!S.length) return null;
+  let j = S.findIndex(s => s.t >= t);
+  if (j <= 0) return S[Math.max(0, j)].kp;
+  const a = S[j - 1], b = S[j], u = (t - a.t) / (b.t - a.t || 1);
+  return a.kp.map((p, k) => [p[0] + (b.kp[k][0] - p[0]) * u, p[1] + (b.kp[k][1] - p[1]) * u, Math.min(p[2], b.kp[k][2])]);
+}
+function draw() {
+  const W = ov.width, H = ov.height;
+  octx.clearRect(0, 0, W, H);
+  const t = vid.currentTime || 0;
+  $('#time').textContent = vid.duration ? `${fmt(t, 2)} / ${fmt(vid.duration, 2)} s` : '–';
+  if (!cur || !cur.tracks || !vid.videoWidth) return;
+  const sx = W / vid.videoWidth, sy = H / vid.videoHeight, lw = Math.max(2, W / 400);
+  const cs = getComputedStyle(document.documentElement), acc = cs.getPropertyValue('--accent').trim() || '#d9480f';
+  for (const tr of shownTracks()) {
+    const kp = kpAt(tr, t); if (!kp) continue;
+    // Referenz: Wirbelsaeule beim Ansprechen (gestrichelt), damit Aufrichten/Verschieben sichtbar wird
+    const A = tr.samples[tr.phases.addressI].kp;
+    const hA = mid(A[11], A[12]), sA = mid(A[5], A[6]);
+    octx.setLineDash([8 * lw / 2, 6 * lw / 2]); octx.strokeStyle = 'rgba(255,255,255,.55)'; octx.lineWidth = lw;
+    octx.beginPath(); octx.moveTo(hA[0] * sx, hA[1] * sy); octx.lineTo(sA[0] * sx, sA[1] * sy); octx.stroke();
+    octx.beginPath(); octx.arc(A[0][0] * sx, A[0][1] * sy, tr.phases.torso * 0.18 * sx, 0, 7); octx.stroke();
+    octx.setLineDash([]);
+    for (const [a, b] of EDGES) {
+      if (kp[a][2] < 0.2 || kp[b][2] < 0.2) continue;
+      octx.strokeStyle = 'rgba(0,0,0,.55)'; octx.lineWidth = lw * 2.6;
+      octx.beginPath(); octx.moveTo(kp[a][0] * sx, kp[a][1] * sy); octx.lineTo(kp[b][0] * sx, kp[b][1] * sy); octx.stroke();
+      octx.strokeStyle = (a === 11 && b === 12) || (a === 5 && b === 6) ? acc : '#ffffff'; octx.lineWidth = lw * 1.3;
+      octx.beginPath(); octx.moveTo(kp[a][0] * sx, kp[a][1] * sy); octx.lineTo(kp[b][0] * sx, kp[b][1] * sy); octx.stroke();
+    }
+    const h = mid(kp[11], kp[12]), s = mid(kp[5], kp[6]);
+    if (h[2] > 0.2 && s[2] > 0.2) { octx.strokeStyle = acc; octx.lineWidth = lw * 1.6; octx.beginPath(); octx.moveTo(h[0] * sx, h[1] * sy); octx.lineTo(s[0] * sx, s[1] * sy); octx.stroke(); }
+    octx.fillStyle = acc;
+    kp.forEach(p => { if (p[2] >= 0.2) { octx.beginPath(); octx.arc(p[0] * sx, p[1] * sy, lw * 1.6, 0, 7); octx.fill(); } });
+  }
+}
+
+// ---------------------------------------------------------------- Claude fragen
+let sample = null;
+window.claude?.use?.('sample')?.then(s => { sample = s; if (!s) $('#bClaude').hidden = true; }).catch(() => { $('#bClaude').hidden = true; });
+if (!window.claude?.use) $('#bClaude').hidden = true;
+$('#bClaude').onclick = async () => {
+  if (!sample || !cur || !cur.tracks) return;
+  const box = $('#claudeOut'); box.hidden = false; box.textContent = 'Claude denkt nach …';
+  $('#bClaude').disabled = true;
+  const data = {
+    schlaeger: cur.club || 'unbekannt', schlaegerart: CAT_NAME[category(cur.club)],
+    schlaghand: cur.handUsed === 'RH' ? 'Rechtshänder' : 'Linkshänder',
+    messwerte: cur.tracks.map(tr => ({ kamera: tr.view === 'hinten' ? 'hinten (Down-the-Line)' : 'seitlich (Face-On)',
+      werte: tr.metrics.map(m => ({ name: m.name, wert: +m.v.toFixed(m.d + 1), einheit: m.unit.trim() || '-', richtwert: m.r, bewertung: m.cls })) })),
+  };
+  const prompt = `Du bist ein erfahrener Golflehrer (PGA). Antworte auf Deutsch, knapp und praktisch für einen Amateur.
+Grundlage sind 2D-Messwerte aus einer Video-Posenerkennung (RL = Rumpflängen, Schulter- bis Hüftmitte; positive Werte bei "Hüfte Richtung Ball" = zum Ball hin, bei "Hüfte/Kopf zum Ziel" = Richtung Ziel, "Kopf seitlich im Rückschwung" positiv = weg vom Ziel, "Aufrichten" positiv = Oberkörper richtet sich auf, "Kopfhöhe" positiv = Kopf tiefer).
+Messwerte (JSON): ${JSON.stringify(data)}
+Aufgabe:
+1. Die 2–3 wichtigsten Ansatzpunkte, nach Wirkung sortiert, jeweils mit kurzer Begründung passend zum Schläger (${data.schlaeger}, ${data.schlaegerart}) und zur Schlaghand.
+2. Zu jedem Punkt eine konkrete Übung (Drill) für die Range oder den Simulator.
+3. Ein Satz, was bereits gut ist.
+Keine Einleitung, keine Wiederholung der Zahlen in Tabellenform, maximal 220 Wörter. Weise kurz darauf hin, wenn ein Wert eher ein Messfehler sein könnte.`;
+  try {
+    const res = await sample(prompt, { onText: ({ text }) => { box.textContent = text; }, modelTier: 'default' });
+    box.textContent = res.text;
+  } catch (e) {
+    box.textContent = e && e.code === 'rate_limited' ? 'Gerade zu viele Anfragen – bitte in einer Minute erneut versuchen.'
+      : e && e.code === 'not_granted' ? 'Claude-Anfragen sind für diese Seite nicht freigegeben.' : 'Anfrage fehlgeschlagen.';
+  } finally { $('#bClaude').disabled = false; }
+};
+
+function setStatus(t, err) { const s = $('#status'); s.textContent = t; s.classList.toggle('err', !!err); }
+function setProg(f) { $('#prog').style.width = Math.round(f * 100) + '%'; }
+renderResults();
+})();
+</script>
+</body>
+</html>

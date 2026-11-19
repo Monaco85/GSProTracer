@@ -60,6 +60,7 @@ dialog::backdrop{background:#0008}
   <span class="spacer"></span>
   <label class="small"><input type="checkbox" id="autoplay" checked> neuen Schuss automatisch abspielen</label>
   <a href="/live" target="_blank"><button title="Live-Bild vom Handy (ca. 5 fps) zum Ausrichten der Kamera">📷 Kamera ausrichten</button></a>
+  <a id="lnkSchwung" href="/schwung" target="_blank"><button title="Körperhaltung erkennen und Tipps passend zum Schläger (rechnet auf der Grafikkarte)">🏌 Schwung-Check</button></a>
   <button id="btnTest"title="Trigger ohne R10 auslösen (Kamera ausrichten, testen)">Testclip</button>
   <button id="btnSettings">Einstellungen</button>
   <a href="/api/export.csv"><button>CSV-Export</button></a>
@@ -246,6 +247,7 @@ function select(id, autoplay) {
   const v = cur.video;
   $('#vInfo').textContent = v ? `${v.width}×${v.height} · ${fmt(v.fps, 0)} fps · ${fmt(v.duration, 2)} s · ${fmt(v.bytes / 1e6, 1)} MB · ${v.device || ''}` : 'Kein Video zu diesem Schuss.';
   renderExport();
+  $('#lnkSchwung').href = '/schwung?shot=' + encodeURIComponent(id);
   $('#note').value = cur.notes.text || '';
   $('#empty').style.display = cur.has_video ? 'none' : '';
   if (cur.has_video) {

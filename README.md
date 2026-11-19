@@ -252,6 +252,24 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.
 
+### Schwung-Check (Körperanalyse) – <http://localhost:8090/schwung>
+
+Erkennt die Körperhaltung (17 Punkte: Kopf, Schultern, Ellbogen, Hände, Hüfte, Knie, Füße) und gibt Tipps passend
+zum Schläger. Rechnet im Browser auf der **Grafikkarte** (WebGL) – oben steht, auf welcher. Modell (MoveNet Thunder)
+und Rechenbibliothek liegen in `pc\static\`, es wird nichts aus dem Internet geladen.
+
+1. Analyse-Seite → **🏌 Schwung-Check** (öffnet den gerade gewählten Schuss) oder links einen Schuss wählen.
+   Alternativ ein Video ablegen (Export oder einzelner Clip).
+2. **Analysieren**: Kamera hinten und seitlich werden einzeln analysiert; Ansprechen und Treffmoment kommen aus der
+   Tracer-Analyse, „Oben“ = Hände am höchsten.
+3. Skelett über dem Video, Knöpfe hinten/seitlich und Ansprechen/Oben/Treffmoment/Finish; gestrichelt die Haltung
+   beim Ansprechen zum Vergleich.
+4. Messwerte mit Ampel und Tipp je Schlägerart (Driver, Holz, Hybrid, Eisen, Wedge): hinten Rückenwinkel, Aufrichten,
+   Hüfte zum Ball, Kopfhöhe, Knie; seitlich Standbreite, Schulterneigung, Kopf im Rückschwung, Gewichtsverlagerung.
+   Werte mit verdeckten Körperpunkten stehen als „n. m.“ (nicht messbar). Es sind 2D-Richtwerte aus dem Video.
+
+Braucht Chrome oder Edge mit eingeschalteter Grafikbeschleunigung (Einstellungen → System).
+
 ### Rechts- und Linkshänder
 
 Der Tracer erkennt bei jedem Schlag aus dem Video hinten, ob ein **Rechts- oder Linkshänder** schlägt (der Spieler

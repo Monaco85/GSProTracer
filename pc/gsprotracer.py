@@ -34,12 +34,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 VIEWER_PATH = os.path.join(BASE_DIR, "viewer.html")
 LIVE_PATH = os.path.join(BASE_DIR, "live.html")
+SCHWUNG_PATH = os.path.join(BASE_DIR, "schwung.html")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_TYPES = {".js": "application/javascript", ".json": "application/json", ".bin": "application/octet-stream"}
 SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-19c (Linien kuerzer, nur Versatz zum Ansprechen)"
+VERSION = "2026-11-19d (Schwung-Check auf der Grafikkarte: /schwung)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,
@@ -746,6 +749,7 @@ class TracerApp:
         httpd = QuietHTTPServer(("0.0.0.0", self.cfg["http_port"]), handler)
         httpd.daemon_threads = True
         log.info("Analyse-Oberflaeche: http://localhost:%d", self.cfg["http_port"])
+        log.info("Schwung-Check (Koerperanalyse): http://localhost:%d/schwung", self.cfg["http_port"])
         log.info("Shots werden gespeichert in: %s", self.store.root)
         log.info("Videos mit Schlagdaten (mph, Carry m) in: %s", self.exporter.out_dir)
         log.info("PC-IP-Adressen fuer die Handy-App: %s", ", ".join(local_ips()) or "?")
@@ -821,6 +825,23 @@ def make_handler(app: TracerApp):
                 if p in ("/live", "/live.html"):
                     with open(LIVE_PATH, "r", encoding="utf-8") as f:
                         return self.send_text(f.read(), ctype="text/html; charset=utf-8")
+                if p in ("/schwung", "/schwung.html"):
+                    with open(SCHWUNG_PATH, "r", encoding="utf-8") as f:
+                        return self.send_text(f.read(), ctype="text/html; charset=utf-8")
+                m = re.match(r"^/static/([A-Za-z0-9_.-]+)$", p)
+                if m and os.path.splitext(m.group(1))[1] in STATIC_TYPES:
+                    fp = os.path.join(STATIC_DIR, m.group(1))
+                    if not os.path.isfile(fp):
+                        return self.send_text("not found", 404)
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", STATIC_TYPES[os.path.splitext(fp)[1]])
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if p == "/api/preview.jpg":
                     app.request_preview()
                     cam = parse_qs(urlparse(self.path).query).get("cam", ["hinten"])[0]
