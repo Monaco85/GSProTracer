@@ -165,8 +165,9 @@ Sobald ein Clip ankommt, erzeugt der PC automatisch `pc\exports\<Datum>_<Zeit>_<
 - **Schwarzweiß und aufgehellt** per Tonwertkurve (Schatten und Mitten heller, Schwarz bleibt schwarz), vorher leicht entrauscht
 - **Datenpanel** (quer: kompakt oben links, damit Ball und Schlägerkopf frei bleiben; hochkant: unten): Schläger, Datum/Uhrzeit, Ballgeschwindigkeit und Schlägerkopf (mph), Carry vom Garmin (m), Smash, Abflugwinkel,
   Richtung (L/R), Spin, Spinachse, Angle of Attack, Club Path, Face to Target, Face to Path
-- **Schaftlinien mit Winkel:** blau = Ansprechen (ganzes Video), orange = Abschwung (ab kurz vor dem Treffen),
-  verlängert bis zum Bildrand (Schwungebene)
+- **Schaftlinien:** blau = Ansprechen (ganzes Video), orange = Treffmoment (ab kurz vor dem Treffen), halb so lang wie
+  bis zum Bildrand. Keine Gradzahlen (die hängen davon ab, wie gerade die Kamera steht) – beim Treffmoment steht nur der
+  **Versatz zum Ansprechen** (z. B. „Treffmoment −3°“)
 - **Zugeschnitten** von kurz vor dem Ansprechen bis kurz nach dem Treffen, gute Qualität (CRF 20)
 - **Nur vollständige Schüsse:** Wird Treffmoment, Ansprech- oder Schlaglinie nicht erkannt, wird der Schuss verworfen
   (steht im Tracer-Fenster). Abschalten: `only_complete_shots: false`

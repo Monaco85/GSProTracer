@@ -38,7 +38,8 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
 - Export: Schwarzweiß, aufgehellt (Tonwertkurve), zugeschnitten (0,15 s vor dem Rückschwung bis 0,6 s nach
   Treffen), Zeitlupe 1/8, **beide Kameras nebeneinander** (Seitenkamera auf gleiche Höhe), Daten in **mph**,
   **Carry vom Garmin in m** (`BallData.CarryDistance`, Units Yards; im alten Beispiel 0).
-- Linien: nur **Ansprechen** und **Abschwung/Treffmoment** (Schlägerkopf-Bahn wurde auf Wunsch entfernt –
+- Linien: nur **Ansprechen** und **Abschwung/Treffmoment**, **halb so lang** wie bis zum Bildrand, **keine Gradzahlen**
+  (Kamera nie 100 % gerade) – am Treffmoment nur der **Versatz zum Ansprechen** (Wunsch 19.11.) (Schlägerkopf-Bahn wurde auf Wunsch entfernt –
   „ein anderes Mal“). Seitlich zusätzlich Veränderung ggü. Ansprechen; seitlich nur „dünne Linien“ (Ridge-Test).
   Linien in beiden Videos von Hand korrigierbar.
 - Nur vollständig erkannte Schüsse behalten (`only_complete_shots`), Verworfene nach `pc/verworfen/`.

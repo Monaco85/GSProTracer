@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 11
+EXPORT_VERSION = 12
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -496,7 +496,8 @@ class Exporter:
                 x1, y1, x2, y2 = x2, y2, x1, y1
             return math.degrees(math.atan2(y1 - y2, x2 - x1))
 
-        ref = next((l for l in lines if l.get("label") == "Ansprechen"), None) if diff_ref else None
+        # Versatz beim Treffmoment immer gegen die Ansprechlinie (Gradzahlen selbst haengen von der Kameraneigung ab)
+        ref = next((l for l in lines if l.get("label") == "Ansprechen"), None)
         for i, ln in enumerate(lines):
             try:
                 X1, Y1 = float(ln["x1"]) * w, float(ln["y1"]) * h
@@ -510,7 +511,9 @@ class Exporter:
             # unten am Schlaegerkopf etwas ueberstehen lassen, oben bis zum Bildrand verlaengern
             (bx, by), (tx, ty) = ((X1, Y1), (X2, Y2)) if Y1 >= Y2 else ((X2, Y2), (X1, Y1))
             if ln.get("extend", True) and ty != by:
-                tx, ty = bx + (tx - bx) * (0 - by) / (ty - by), 0.0
+                # halb so lang wie bis zum oberen Bildrand
+                topx = bx + (tx - bx) * (0 - by) / (ty - by)
+                tx, ty = bx + (topx - bx) * 0.5, by * 0.5
             by2 = by + 0.02 * h
             bx2 = bx + (tx - bx) * (by2 - by) / (ty - by) if ty != by else bx
             png = f"_ov_{prefix}line{i}.png"
@@ -539,15 +542,16 @@ class Exporter:
                 continue
             start = max(0.0, float(ln.get("from", 0) or 0) - t0)   # Zeit im zugeschnittenen Video
             inputs[png] = start
-            # Beschriftung mit Winkel zur Horizontalen (+ Veraenderung gegenueber dem Ansprechen)
-            ang = math.degrees(math.atan2(abs(Y2 - Y1), abs(X2 - X1)))
-            label = f"{ln.get('label', '')} {ang:.0f}°".strip()
-            if ref is not None and ln is not ref:
+            # Beschriftung ohne Gradzahl; beim Treffmoment nur der Versatz zum Ansprechen
+            name = {"Abschwung": "Treffmoment"}.get(ln.get("label", ""), ln.get("label", ""))
+            label = name
+            if ref is not None and ln is not ref and name:
                 try:
-                    dd = orient(ln) - orient(ref)
-                    label += f" ({dd:+.0f}° ggü. Ansprechen)"
+                    label = f"{name} {orient(ln) - orient(ref):+.0f}°"
                 except (KeyError, TypeError, ValueError):
                     pass
+            if not label:
+                continue
             label = label.replace(".", ",")
             tf = f"_ov_{prefix}lbl{i}.txt"
             files[tf] = label
@@ -556,9 +560,9 @@ class Exporter:
             if diff_ref:                    # Seitenkamera: Beschriftungen oben links untereinander
                 lx, ly = int(fs * 0.6), int(fs * 0.8 + len(filters) * fs * 1.9)
             else:
-                top_x, top_y = (X2, Y2) if Y2 < Y1 else (X1, Y1)
-                lx = int(min(max(top_x + fs * 0.6, 8), w - fs * 9))
-                ly = int(min(max(top_y - fs * 1.8 - i * fs * 1.6, 8), h - fs * 2))
+                # am oberen Ende der (gekuerzten) Linie
+                lx = int(min(max(tx + fs * 0.6, 8), w - fs * 9))
+                ly = int(min(max(ty - fs * 1.8 - i * fs * 1.6, 8), h - fs * 2))
             filters.append(
                 f"drawtext=fontfile='{font_bold}':textfile={tf}:fontcolor=0x{col}:fontsize={int(fs * 1.1)}"
                 f":box=1:boxcolor=black@0.55:boxborderw={int(fs * 0.3)}:x={lx}:y={ly}:enable='gte(t,{start:.4f})'")

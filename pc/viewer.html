@@ -427,31 +427,11 @@ function drawSide() {
   g.clearRect(0, 0, c2.width, c2.height);
   if (!cur || !cur.has_side || !vid2.videoWidth) return;
   const lines = (cur.notes && cur.notes.side_lines) || [], t = vid2.currentTime || 0;
-  const W = c2.width, H = c2.height, vw = vid2.videoWidth, vh = vid2.videoHeight;
-  const addr = lines.find(l => l.label === 'Ansprechen');
-  const aAddr = addr ? shaftAngle(addr, vw, vh) : null;
-  for (const l of lines) {
-    if (t + 1e-6 < (l.from || 0)) continue;
-    let x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
-    if (l.extend !== false && y2 !== y1) {
-      const [bx, by, tx, ty] = y1 > y2 ? [x1, y1, x2, y2] : [x2, y2, x1, y1];
-      x2 = bx + (tx - bx) * (0 - by) / (ty - by); y2 = 0; x1 = bx; y1 = by + 0.02 * H;
-    }
-    g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,.6)'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
-    g.lineWidth = 2.5; g.strokeStyle = l.color || '#ffeb3b'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
-    const a = shaftAngle(l, vw, vh), shown = Math.round(a <= 90 ? a : 180 - a);
-    let txt = `${l.label} ${shown}°`;
-    if (l !== addr && aAddr != null) { const d = Math.round(a - aAddr); txt += ` (${d > 0 ? '+' : ''}${d}° ggü. Ansprechen)`; }
-    g.font = 'bold 14px system-ui';
-    const tx = 8, ty = 44 + (l === addr ? 0 : 24);
-    g.font = 'bold 14px system-ui'; g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(tx - 3, ty - 14, g.measureText(txt).width + 6, 19);
-    g.fillStyle = l.color; g.fillText(txt, tx, ty);
-  }
+  drawLines(g, c2.width, c2.height, lines, lines.filter(l => t + 1e-6 >= (l.from || 0)), vid2.videoWidth, vid2.videoHeight);
 }
 vid2.addEventListener('timeupdate', drawSide); vid2.addEventListener('seeked', drawSide);
 
 // Linie im Seitenvideo von Hand ziehen (ersetzt die automatische gleicher Art)
-let drag2 = null;
 const rel2 = e => { const r = $('#cv2').getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
 $('#cv2').onmousedown = e => {
   if (!cur || !cur.has_side) return;
@@ -483,28 +463,52 @@ const LINE_TYPES = {
   help: { label: '', color: '#ffeb3b', fromZero: true },
 };
 function savedLines() { return (cur && cur.notes && cur.notes.lines) || []; }
+// Linien: vom Schlaegerkopf den Schaft entlang, halb so lang wie bis zum oberen Bildrand.
+// Beschriftung ohne Gradzahl (haengt von der Kameraneigung ab) - beim Treffmoment nur der Versatz zum Ansprechen,
+// der ist unabhaengig davon, ob die Kamera schief steht.
+let drag2 = null;
+const LINE_NAME = { Abschwung: 'Treffmoment' };
+function lineGeom(l, W, H) {
+  let x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
+  if (l.extend !== false && y2 !== y1) {
+    const [bx, by, tx, ty] = y1 > y2 ? [x1, y1, x2, y2] : [x2, y2, x1, y1];
+    const topX = bx + (tx - bx) * (0 - by) / (ty - by);
+    x1 = bx; y1 = by + 0.02 * H; x2 = bx + (topX - bx) * 0.5; y2 = by * 0.5;
+  }
+  return [x1, y1, x2, y2];
+}
+function orientDeg(l, vw, vh) {      // Lage im Bild 0..180 Grad, Punkt 1 unten
+  let [x1, y1, x2, y2] = [l.x1 * vw, l.y1 * vh, l.x2 * vw, l.y2 * vh];
+  if (y1 < y2) [x1, y1, x2, y2] = [x2, y2, x1, y1];
+  return Math.atan2(y1 - y2, x2 - x1) * 180 / Math.PI;
+}
+function lineText(l, lines, vw, vh) {
+  const name = LINE_NAME[l.label] || l.label || '';
+  if (!name || l.label === 'Ansprechen') return name;
+  const ref = lines.find(x => x.label === 'Ansprechen');
+  if (!ref || ref === l) return name;
+  const d = Math.round(orientDeg(l, vw, vh) - orientDeg(ref, vw, vh));
+  return `${name} ${d > 0 ? '+' : ''}${d}°`;
+}
+function drawLines(g, W, H, lines, shown, vw, vh) {
+  shown.forEach((l, k) => {
+    const [x1, y1, x2, y2] = l === drag || l === drag2 ? [l.x1 * W, l.y1 * H, l.x2 * W, l.y2 * H] : lineGeom(l, W, H);
+    g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,.6)'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    g.lineWidth = 2.5; g.strokeStyle = l.color || '#ffeb3b'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    const txt = lineText(l, lines, vw, vh);
+    if (!txt) return;
+    g.font = 'bold 14px system-ui';
+    const tx = 8, ty = 44 + k * 24;                // Beschriftung oben links untereinander
+    g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(tx - 3, ty - 14, g.measureText(txt).width + 6, 19);
+    g.fillStyle = l.color || '#ffeb3b'; g.fillText(txt, tx, ty);
+  });
+}
 function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
-  const W = cv.width, H = cv.height, t = vid.currentTime || 0;
-  const all = savedLines().filter(l => t + 1e-6 >= (l.from || 0));
-  if (drag) all.push(drag);
-  for (const l of all) {
-    let x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
-    if (l.extend !== false && y2 !== y1) {           // nach oben bis zum Bildrand verlängern
-      const [bx, by, tx, ty] = y1 > y2 ? [x1, y1, x2, y2] : [x2, y2, x1, y1];
-      x2 = bx + (tx - bx) * (0 - by) / (ty - by); y2 = 0; x1 = bx; y1 = by + 0.02 * H;
-    }
-    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.6)';
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    ctx.lineWidth = 2.5; ctx.strokeStyle = l.color || '#ffeb3b';
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    if (l.label) {
-      const ang = Math.round(Math.atan2(Math.abs((l.y2 - l.y1) * vid.videoHeight), Math.abs((l.x2 - l.x1) * vid.videoWidth)) * 180 / Math.PI);
-      const tx = Math.min(W - 150, (l.y2 < l.y1 ? l.x2 : l.x1) * W + 8), ty = Math.max(16, (Math.min(l.y1, l.y2)) * H - 10);
-      ctx.font = 'bold 14px system-ui'; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(tx - 3, ty - 14, ctx.measureText(`${l.label} ${ang}°`).width + 6, 19);
-      ctx.fillStyle = l.color; ctx.fillText(`${l.label} ${ang}°`, tx, ty);
-    }
-  }
+  const t = vid.currentTime || 0, lines = savedLines();
+  const shown = lines.filter(l => t + 1e-6 >= (l.from || 0));
+  if (drag) shown.push(drag);
+  drawLines(ctx, cv.width, cv.height, lines, shown, vid.videoWidth || 16, vid.videoHeight || 9);
 }
 vid.addEventListener('timeupdate', draw); vid.addEventListener('seeked', draw);
 const rel = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
