@@ -21,7 +21,7 @@ log = logging.getLogger("tracer.export")
 
 MPH_TO_KMH = 1.609344
 # Hochzaehlen, wenn sich das Aussehen der Export-Videos aendert -> alte Videos werden beim Start neu erstellt
-EXPORT_VERSION = 9
+EXPORT_VERSION = 10
 FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
 FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
 
@@ -456,7 +456,8 @@ class Exporter:
                 notes["impact_time"] = res["impact_time"]
             notes["swing"] = {"start": res["swing_start"], "end": res["swing_end"]}
             why = "; ".join(f"{k.split('_')[0]}: {res[k]}" for k in ("address_error", "downswing_error") if res.get(k))
-            log.info("Analyse %s: Treffmoment %.3f s, Linien: %s%s", sid, res["impact_time"],
+            hand = {"RH": "Rechtshaender", "LH": "Linkshaender"}.get(res.get("handed"), "Schlaghand ?")
+            log.info("Analyse %s: Treffmoment %.3f s, %s, Linien: %s%s", sid, res["impact_time"], hand,
                      ", ".join(l["label"] for l in res.get("lines", [])) or "keine", f" ({why})" if why else "")
         self.store.write_json(sid, "notes.json", notes)
         return notes
@@ -635,10 +636,14 @@ class Exporter:
 
         # Automatische Analyse (Treffmoment, Ansprechen, Schaftlinien) - einmal pro Clip
         notes = self.store.read_json(sid, "notes.json") or {}
-        if self.cfg.data.get("auto_analysis", True) and notes.get("analysis") is None:
+        ana = notes.get("analysis")
+        first = ana is None
+        # aeltere Analysen ohne Schlaghand einmal nachholen (verwirft dabei nichts nachtraeglich)
+        redo = ana is not None and "handed" not in ana and "error" not in ana
+        if self.cfg.data.get("auto_analysis", True) and (first or redo):
             notes = self._auto_analyze(sid, clip, notes, video)
-            # nur vollstaendig erkannte Schuesse behalten (Treffmoment, Ansprech- und Schlaglinie)
-            if (self.cfg.data.get("only_complete_shots", True) and not record.get("test")
+            # nur vollstaendig erkannte Schuesse behalten (Treffmoment, Ansprech- und Schlaglinie) - nur neue
+            if (first and self.cfg.data.get("only_complete_shots", True) and not record.get("test")
                     and "analysis" in notes):
                 labels = {l.get("label") for l in notes.get("lines") or []}
                 missing = [n for n, ok in (("Treffmoment", notes.get("impact_time") is not None),
@@ -660,6 +665,11 @@ class Exporter:
         if os.path.exists(os.path.join(shot_dir, "clip_side.mp4")):
             self.process_side(sid)
             notes = self.store.read_json(sid, "notes.json") or notes      # Linien der Seitenkamera neu lesen
+        hand = {"RH": "Rechtshänder", "LH": "Linkshänder"}.get((notes.get("analysis") or {}).get("handed"))
+        if hand and not record.get("test"):
+            files["_ov_head.txt"] = " · ".join(x for x in [str(record.get("club") or ""), hand, ts] if x)
+            with open(os.path.join(shot_dir, "_ov_head.txt"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(files["_ov_head.txt"])
         sw = notes.get("swing") or {}
         t0 = float(sw.get("start", 0.0)) if self.cfg.data.get("export_trim", True) else 0.0
         addr = (notes.get("analysis") or {}).get("address_time")

@@ -251,6 +251,14 @@ Ein zweites Handy mit derselben App kann im 90-Grad-Winkel (seitlich, Face-On) m
 Videolage der Seitenkamera: **Einstellungen → Videolage Seitenkamera**. Mit einer alten App ohne Rollen-Knopf
 kann die Rolle per IP in `config.json` gesetzt werden: `"camera_roles": {"192.168.1.163": "seitlich"}`.
 
+### Rechts- und Linkshänder
+
+Der Tracer erkennt bei jedem Schlag aus dem Video hinten, ob ein **Rechts- oder Linkshänder** schlägt (der Spieler
+steht seitlich vom Ball, dort bewegt sich beim Schwung am meisten). Steht im Fenster bei „Analyse …“, auf der
+Analyse-Seite unter Schlägerdaten („Schlaghand“) und im Export-Video in der Kopfzeile. Weicht das Bild von der
+Einstellung des Spielers in GSPro ab, steht dort ein ⚠-Hinweis. Für Rechtshänder einfach beide Kameras auf die
+andere Seite stellen – die Erkennung der Linien funktioniert spiegelbildlich genauso.
+
 ### Fokus auf den Ball
 
 Der normale Video-Autofokus sucht nach, sobald sich Schläger oder Körper durchs Bild bewegen – dann wird es

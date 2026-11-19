@@ -39,7 +39,7 @@ SHOT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 log = logging.getLogger("tracer")
 
 # Stand des Programms (steht beim Start im Fenster) - so sieht man, ob "git pull" geklappt hat
-VERSION = "2026-11-17f (Export mit beiden Kameras, schneller, Seitenlinie verbessert)"
+VERSION = "2026-11-19 (Rechts-/Linkshaender-Erkennung)"
 
 DEFAULT_CONFIG = {
     "proxy_listen_port": 9211,

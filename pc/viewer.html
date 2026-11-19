@@ -242,7 +242,7 @@ function select(id, autoplay) {
     row('Spinachse', fmt(b.SpinAxis), '°') + row('Backspin', fmt(b.Backspin, 0), 'rpm') + row('Sidespin', fmt(b.SideSpin, 0), 'rpm');
   $('#tClub').innerHTML = row('Schlägerkopf', fmt(mph(c.Speed)), 'mph') + row('Angle of Attack', fmt(c.AngleOfAttack), '°') +
     row('Club Path', fmt(c.Path), '°') + row('Face to Target', fmt(c.FaceToTarget), '°') +
-    row('Face to Path', fmt(c.HorizontalFaceImpact || ((typeof c.FaceToTarget === 'number' && typeof c.Path === 'number') ? c.FaceToTarget - c.Path : null)), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '');
+    row('Face to Path', fmt(c.HorizontalFaceImpact || ((typeof c.FaceToTarget === 'number' && typeof c.Path === 'number') ? c.FaceToTarget - c.Path : null)), '°') + row('Smash', b.Speed && c.Speed ? fmt(b.Speed / c.Speed, 2) : '–', '') + handRow();
   const v = cur.video;
   $('#vInfo').textContent = v ? `${v.width}×${v.height} · ${fmt(v.fps, 0)} fps · ${fmt(v.duration, 2)} s · ${fmt(v.bytes / 1e6, 1)} MB · ${v.device || ''}` : 'Kein Video zu diesem Schuss.';
   renderExport();
@@ -315,6 +315,16 @@ function syncSide() {
 }
 ['play', 'pause', 'seeked', 'seeking', 'ratechange', 'timeupdate'].forEach(ev => vid.addEventListener(ev, syncSide));
 vid.addEventListener('play', () => { const f = () => { syncSide(); if (!vid.paused && !vid.ended) requestAnimationFrame(f); }; f(); });
+
+// Schlaghand: aus dem Bild (Analyse) und aus GSPro (Spieler-Einstellung) - Hinweis, wenn sie sich widersprechen
+function handRow() {
+  const name = h => ({ RH: 'Rechtshänder', LH: 'Linkshänder' })[h] || null;
+  const img = name(((cur.notes || {}).analysis || {}).handed);
+  const gs = name(((cur.shot || {}).player || {}).Handed);
+  let v = img || (gs ? gs + ' (GSPro)' : '–');
+  if (img && gs && img !== gs) v = `⚠ Bild: ${img} · GSPro: ${gs}`;
+  return `<tr><td>Schlaghand</td><td class="n">${v}</td></tr>`;
+}
 
 function renderExport() {
   const el = $('#exInfo');

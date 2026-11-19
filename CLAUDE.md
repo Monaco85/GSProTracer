@@ -14,7 +14,9 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
   **RTX 3060 Ti** (NVENC wird bisher NICHT genutzt – Grund unbekannt, Log-Zeile „Grafikkarte NVIDIA NVENC nicht
   nutzbar: …“ steht noch aus; Verdacht: Treiber zu alt für FFmpeg 9).
 - Monitor 16:10, Browser ca. 1920×1080 sichtbar – Analyse-Seite muss ohne Scrollen passen.
-- Spieler **Linkshänder**.
+- Spieler meist **Linkshänder**; seit 18.11. schlägt auch ein **Rechtshänder** (Kameras dann auf der anderen Seite).
+  Schlaghand wird erkannt (`detect_handedness`, Bewegung links/rechts vom Ball), Analyse ist spiegelsymmetrisch
+  (gespiegelter Beispiel-Clip liefert dieselben Winkel).
 - **Kamera hinten** (Down-the-Line): Handy liegt **quer und kopfüber** → `clip_orientation: "quer_180"`.
 - **Kamera seitlich** (90°, Face-On): Video kommt **hochkant** an (`clip_orientation_side: ""`).
 - App-Rolle per Knopf „Kamera: hinten/seitlich“ (ab Build 11). Neueste App: **Build 13** (Fokus fest auf Ball).

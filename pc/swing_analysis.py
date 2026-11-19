@@ -220,6 +220,31 @@ def impact_in_window(path, trigger_time, before=2.5, after=0.3):
     return None if idx is None else round((first + idx) / fps, 4)
 
 
+def detect_handedness(frames, ball, address, impact, ref=None):
+    """
+    Rechts- oder Linkshaender aus der Kamera hinten (Down-the-Line): Der Spieler steht seitlich vom Ball,
+    dort bewegt sich beim Schwung am meisten (Koerper, Arme). Linkshaender: rechts vom Ball, Rechtshaender: links.
+    Rueckgabe ("LH"|"RH", Sicherheit 0..1) oder (None, 0).
+    """
+    H, W = frames[0].shape
+    bx, by = ball
+    a = address if address is not None else max(0, impact - 240)
+    idx = [i for i in range(a, impact, max(1, (impact - a) // 24))] or [impact - 1]
+    base = frames[a].astype(np.int16)
+    y0, y1 = 0, int(min(H, by + 0.05 * H))               # oberhalb bis knapp unter dem Ball
+    gap = int(0.06 * W)                                   # Schlaeger direkt am Ball nicht mitzaehlen
+    left = right = 0.0
+    for i in idx:
+        d = np.abs(frames[i].astype(np.int16) - base)[y0:y1] > 20
+        left += float(d[:, :max(0, bx - gap)].mean()) if bx - gap > 0 else 0.0
+        right += float(d[:, min(W, bx + gap):].mean()) if bx + gap < W else 0.0
+    tot = left + right
+    if tot <= 1e-6:
+        return None, 0.0
+    conf = abs(right - left) / tot
+    return ("LH" if right > left else "RH"), round(conf, 2)
+
+
 def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Ansprechen", "Abschwung"), thin=False):
     """
     Liefert dict mit impact_time, address_time, swing_start, lines (normiert, wie notes.json) oder
@@ -291,6 +316,13 @@ def analyze(path, trigger_time=None, max_ang=88, window=None, labels=("Anspreche
                                  "extend": True, "auto": True, "frame_time": round(d / fps, 4)})
             res.pop("downswing_error", None)
             break
+    # Schlaghand (Rechts-/Linkshaender) aus der Bewegung neben dem Ball
+    try:
+        hand, conf = detect_handedness(frames, ball, address, impact)
+        if hand:
+            res["handed"], res["handed_conf"] = hand, conf
+    except Exception as ex:
+        log.info("Schlaghand nicht bestimmt: %s", ex)
     # Schnittfenster fuer den Export: Ansprechposition kurz zeigen, dann Schwung bis kurz nach dem Treffen
     start = (address / fps - ADDRESS_LEAD) if address is not None else (impact / fps - 2.5)
     res["swing_start"] = round(max(0.0, start), 4)
