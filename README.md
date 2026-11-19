@@ -21,6 +21,8 @@ Nur dieser Clip wird an den PC geschickt und danach auf dem Handy gelöscht.
 
 ---
 
+Ausführlicher Verlauf, Entscheidungen und offene Punkte: [`docs/VERLAUF.md`](docs/VERLAUF.md)
+
 ## Inhalt
 
 1. [Funktionen](#funktionen)

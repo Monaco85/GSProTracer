@@ -1,6 +1,6 @@
 # GSPro Tracer – Kontext für Claude
 
-Projekt von Sebastian (Repo `Monaco85/GSProTracer`). Kommunikation **auf Deutsch**, kurz und praktisch –
+Projekt von Sebastian (Repo `Monaco85/GSProTracer`). Ausführlicher Verlauf aller bisherigen Arbeiten: `docs/VERLAUF.md`. Kommunikation **auf Deutsch**, kurz und praktisch –
 er ist Golfer, kein Entwickler. Befehle für ihn immer als PowerShell/`git` in eigenem Code-Block.
 
 ## Was es macht
@@ -47,7 +47,7 @@ Analyse-Seite im Browser (`pc/viewer.html`), Live-Seite zum Ausrichten (`pc/live
 
 ## Schwung-Check (Körperanalyse)
 Lokal im Tracer: `pc/schwung.html` unter `/schwung` (Artefakt lief beim Nutzer nicht; Artefakt-Version
-<https://claude.ai/artifact/XcFQShjGLwsZquAwvmjS1Y> ist veraltet). MoveNet Thunder per tfjs/WebGL auf der GPU,
+<https://claude.ai/artifact/XcFQShjGLwsZquAwvmjS1Y> ist veraltet, Quelltext in `docs/artefakt-schwungcheck.html`). MoveNet Thunder per tfjs/WebGL auf der GPU,
 Dateien in `pc/static/` (`tf.min.js`, `movenet-thunder.json/.bin`). Tracer-Schüsse: hinten + seitlich getrennt
 analysiert, Ansprechen/Treffmoment aus `notes.analysis` (Seite: über `sync.offset`), nur dieses Fenster dicht abgetastet.
 Getestet am Rechtshänder-Beispiel (Skelett passt in beiden Kameras); Richtwerte/Tipps sind Faustwerte, nicht validiert.
